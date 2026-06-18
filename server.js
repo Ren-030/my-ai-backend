@@ -1,5 +1,7 @@
 const express = require('express');
+const cors = require('cors');
 const app = express();
+app.use(cors()); // 允许所有来源访问
 const PORT = process.env.PORT || 3000;
 
 // 允许接收 JSON 格式的数据
