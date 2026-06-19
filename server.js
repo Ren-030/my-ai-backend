@@ -18,7 +18,7 @@ app.get('/ping', (req, res) => {
 });
 
 app.post('/chat', async (req, res) => {
-    const { message } = req.body;
+    const { message, sessionId } = req.body;
 
     if (!message) {
         return res.status(400).json({ error: '消息不能为空' });
@@ -30,17 +30,17 @@ app.post('/chat', async (req, res) => {
     }
 
     try {
-        // 1. 尝试保存用户消息，并打印结果
+        // 保存用户消息到 Supabase（带 session_id）
         const { error: userError } = await supabase
             .from('messages')
-            .insert([{ role: 'user', content: message }]);
+            .insert([{ role: 'user', content: message, session_id: sessionId }]);
         if (userError) {
             console.error('❌ 保存用户消息失败:', userError.message);
         } else {
             console.log('✅ 用户消息已存入 Supabase');
         }
 
-        // 2. 调用 DeepSeek API
+        // 调用 DeepSeek API
         const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
             method: 'POST',
             headers: {
@@ -60,10 +60,10 @@ app.post('/chat', async (req, res) => {
         const data = await response.json();
         const reply = data.choices?.[0]?.message?.content || '抱歉，我没有理解。';
 
-        // 3. 尝试保存 AI 回复，并打印结果
+        // 保存 AI 回复到 Supabase（带 session_id）
         const { error: aiError } = await supabase
             .from('messages')
-            .insert([{ role: 'ai', content: reply }]);
+            .insert([{ role: 'ai', content: reply, session_id: sessionId }]);
         if (aiError) {
             console.error('❌ 保存 AI 回复失败:', aiError.message);
         } else {
