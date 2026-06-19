@@ -1,7 +1,12 @@
 const express = require('express');
 const cors = require('cors');
+const { createClient } = require('@supabase/supabase-js');
 const app = express();
 app.use(cors()); // 允许所有来源访问
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+);
 const PORT = process.env.PORT || 3000;
 
 // 允许接收 JSON 格式的数据
@@ -28,6 +33,8 @@ app.post('/chat', async (req, res) => {
     }
 
     try {
+     // 保存用户消息到 Supabase
+await supabase.from('messages').insert([{ role: 'user', content: message }]);   
         // 调用 DeepSeek API
         const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
             method: 'POST',
@@ -49,6 +56,8 @@ app.post('/chat', async (req, res) => {
 
         // 提取 AI 的回复内容
         const reply = data.choices?.[0]?.message?.content || '抱歉，我没有理解。';
+        // 保存 AI 回复到 Supabase
+await supabase.from('messages').insert([{ role: 'ai', content: reply }]);
 
         res.json({ reply });
 
