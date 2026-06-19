@@ -34,7 +34,9 @@ app.post('/chat', async (req, res) => {
 
     try {
      // 保存用户消息到 Supabase
-await supabase.from('messages').insert([{ role: 'user', content: message }]);   
+ await supabase.from('messages').insert([{ role: 'user', content: message }])
+  .then(() => console.log('✅ 用户消息已存入 Supabase'))
+  .catch(err => console.error('❌ 存入用户消息失败:', err.message));
         // 调用 DeepSeek API
         const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
             method: 'POST',
@@ -57,7 +59,9 @@ await supabase.from('messages').insert([{ role: 'user', content: message }]);
         // 提取 AI 的回复内容
         const reply = data.choices?.[0]?.message?.content || '抱歉，我没有理解。';
         // 保存 AI 回复到 Supabase
-await supabase.from('messages').insert([{ role: 'ai', content: reply }]);
+await supabase.from('messages').insert([{ role: 'ai', content: reply }])
+  .then(() => console.log('✅ AI 回复已存入 Supabase'))
+  .catch(err => console.error('❌ 存入 AI 回复失败:', err.message));
 
         res.json({ reply });
 
