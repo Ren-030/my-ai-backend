@@ -179,12 +179,12 @@ if (req.body.system_prompt && req.body.temperature !== undefined) {
             body: JSON.stringify({
                 model: modelName,
                 messages: [
-                    { role: 'system', content: settings.system_prompt },
-                    { role: 'user', content: message }
-                ],
-                stream: false,
-                temperature: settings.temperature,
-                max_tokens: settings.max_tokens
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: message }
+        ],
+        stream: false,
+        temperature: temperature,
+        max_tokens: maxTokens
             })
         });
 
