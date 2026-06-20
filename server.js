@@ -92,7 +92,12 @@ app.post('/chat', async (req, res) => {
         // --- 4.2 根据模型选择 API 地址和 Key ---
         let apiUrl, apiKey, modelName;
 
-        if (model === 'claude') {
+        if (model === 'gemini') {
+            // 使用你的中转站地址和专用 Key
+            apiUrl = 'https://yunwu.ai/v1/chat/completions'; // 中转站标准路径
+            apiKey = 'sk-7Ue5kncSQAyZVBUHYxAsqi9Yn4OoN7h597qbnWM3lLvufbNe'; // 你的中转站 Key
+            modelName = 'gemini-3.1-flash-lite'; // 根据中转站支持的模型名调整
+        } else if (model === 'claude') {
             // 使用你的中转站地址和专用 Key
             apiUrl = 'https://yunwu.ai/v1/chat/completions'; // 中转站标准路径
             apiKey = 'sk-IvyaoDR2qZ2zg4iShnPAKPLPdJwx9q2txhFKX0ihUKgmHvZb'; // 你的中转站 Key
