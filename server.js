@@ -18,6 +18,21 @@ app.get('/ping', (req, res) => {
 });
 
 app.post('/chat', async (req, res) => {
+    // 获取某个会话的历史消息
+app.get('/messages/:sessionId', async (req, res) => {
+    const { sessionId } = req.params;
+    const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('session_id', sessionId)
+        .order('created_at', { ascending: true });
+
+    if (error) {
+        console.error('❌ 获取历史消息失败:', error.message);
+        return res.status(500).json({ error: error.message });
+    }
+    res.json(data);
+});
     const { message, sessionId } = req.body;
 
     if (!message) {
