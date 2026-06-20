@@ -20,6 +20,31 @@ app.get('/ping', (req, res) => {
 app.post('/chat', async (req, res) => {
     // 获取某个会话的历史消息
 app.get('/messages/:sessionId', async (req, res) => {
+    // 获取所有会话列表（按最后活动时间排序）
+app.get('/sessions', async (req, res) => {
+    const { data, error } = await supabase
+        .from('messages')
+        .select('session_id, created_at')
+        .order('created_at', { ascending: false });
+
+    if (error) {
+        console.error('❌ 获取会话列表失败:', error.message);
+        return res.status(500).json({ error: error.message });
+    }
+
+    // 去重并提取 session_id，保留最新时间
+    const sessionMap = new Map();
+    data.forEach(item => {
+        if (!sessionMap.has(item.session_id)) {
+            sessionMap.set(item.session_id, item.created_at);
+        }
+    });
+    const sessions = Array.from(sessionMap.entries()).map(([id, lastActive]) => ({
+        id,
+        lastActive
+    }));
+    res.json(sessions);
+});
     const { sessionId } = req.params;
     const { data, error } = await supabase
         .from('messages')
