@@ -96,7 +96,7 @@ app.post('/chat', async (req, res) => {
             // 使用你的中转站地址和专用 Key
             apiUrl = 'https://yunwu.ai/v1/chat/completions'; // 中转站标准路径
             apiKey = 'sk-IvyaoDR2qZ2zg4iShnPAKPLPdJwx9q2txhFKX0ihUKgmHvZb'; // 你的中转站 Key
-            modelName = 'claude-3-opus-20240229'; // 根据中转站支持的模型名调整
+            modelName = 'claude-opus-4-6'; // 根据中转站支持的模型名调整
         } else {
             // 默认使用 DeepSeek 官方 API
             apiUrl = 'https://api.deepseek.com/v1/chat/completions';
