@@ -137,6 +137,19 @@ if (req.body.system_prompt && req.body.temperature !== undefined) {
     temperature = settings.temperature;
     maxTokens = settings.max_tokens;
 }
+        // --- 1.5 拉取最近的历史消息（用于上下文） ---
+const { data: historyData } = await supabase
+    .from('messages')
+    .select('role, content')
+    .eq('session_id', sessionId)
+    .order('created_at', { ascending: true })
+    .limit(20); // 取最近20条消息（约10轮对话）
+
+// 构建历史消息数组（不包含 system 角色）
+const historyMessages = historyData ? historyData.map(msg => ({
+    role: msg.role,
+    content: msg.content
+})) : [];
 
         // --- 2. 保存用户消息到 Supabase ---
         const { error: userError } = await supabase
@@ -179,8 +192,9 @@ if (req.body.system_prompt && req.body.temperature !== undefined) {
             body: JSON.stringify({
                 model: modelName,
                 messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: message }
+                  { role: 'system', content: systemPrompt },
+                ...historyMessages,  // 展开历史消息
+                  { role: 'user', content: message }  // 当前消息放在最后
         ],
         stream: false,
         temperature: temperature,
