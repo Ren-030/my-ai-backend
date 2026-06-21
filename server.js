@@ -145,9 +145,9 @@ const { data: historyData } = await supabase
     .order('created_at', { ascending: true })
     .limit(20); // 取最近20条消息（约10轮对话）
 
-// 构建历史消息数组（不包含 system 角色）
+// 构建历史消息数组（将数据库中的 'ai' 转换为 API 需要的 'assistant'）
 const historyMessages = historyData ? historyData.map(msg => ({
-    role: msg.role,
+    role: msg.role === 'ai' ? 'assistant' : msg.role,
     content: msg.content
 })) : [];
 
