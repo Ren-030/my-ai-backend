@@ -42,10 +42,11 @@ app.get('/messages/:sessionId', async (req, res) => {
 // ========================
 // 3. 获取所有会话列表
 // ========================
+// 获取所有会话列表（含会话名称）
 app.get('/sessions', async (req, res) => {
     const { data, error } = await supabase
         .from('messages')
-        .select('session_id, created_at')
+        .select('session_id, session_name, created_at')
         .order('created_at', { ascending: false });
 
     if (error) {
@@ -53,19 +54,21 @@ app.get('/sessions', async (req, res) => {
         return res.status(500).json({ error: error.message });
     }
 
-    // 去重并提取 session_id
+    // 去重并提取 session_id，保留最新的 session_name
     const sessionMap = new Map();
     data.forEach(item => {
         if (!sessionMap.has(item.session_id)) {
-            sessionMap.set(item.session_id, item.created_at);
+            sessionMap.set(item.session_id, {
+                id: item.session_id,
+                session_name: item.session_name,
+                lastActive: item.created_at
+            });
         }
     });
-    const sessions = Array.from(sessionMap.entries()).map(([id, lastActive]) => ({
-        id,
-        lastActive
-    }));
+    const sessions = Array.from(sessionMap.values());
     res.json(sessions);
 });
+
 // 获取设置
 app.get('/settings', async (req, res) => {
     try {
@@ -101,6 +104,45 @@ app.post('/settings', async (req, res) => {
         console.error('❌ 更新设置失败:', error.message);
         res.status(500).json({ error: '更新设置失败' });
     }
+});
+
+// 重命名会话
+app.put('/sessions/:sessionId', async (req, res) => {
+    const { sessionId } = req.params;
+    const { session_name } = req.body;
+
+    if (!session_name || session_name.trim() === '') {
+        return res.status(400).json({ error: '会话名称不能为空' });
+    }
+
+    const { error } = await supabase
+        .from('messages')
+        .update({ session_name: session_name.trim() })
+        .eq('session_id', sessionId);
+
+    if (error) {
+        console.error('❌ 重命名会话失败:', error.message);
+        return res.status(500).json({ error: error.message });
+    }
+
+    res.json({ success: true });
+});
+
+// 删除会话（删除该会话下的所有消息）
+app.delete('/sessions/:sessionId', async (req, res) => {
+    const { sessionId } = req.params;
+
+    const { error } = await supabase
+        .from('messages')
+        .delete()
+        .eq('session_id', sessionId);
+
+    if (error) {
+        console.error('❌ 删除会话失败:', error.message);
+        return res.status(500).json({ error: error.message });
+    }
+
+    res.json({ success: true });
 });
 
 // ========================
