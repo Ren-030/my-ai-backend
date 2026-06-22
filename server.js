@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
@@ -154,12 +155,24 @@ const generateSummary = async (messages) => {
     ).join('\n');
 
     const prompt = `
-请将以下对话压缩成一段300-500字的摘要，包含以下四个部分：
+请将以下对话压缩为一段简洁的记忆摘要，约200-300字。
 
-【用户信息】
-【重要事实】
-【当前任务】
-【未完成事项】
+【保留什么】
+- 茶与和AI之间的情感状态和互动氛围
+- 重要的约定、承诺或共同决定
+- 茶与的近况、心情变化、生活细节
+- 值得被记住的具体信息（名字、喜好、计划、偏好）
+- 对话中反复出现的主题或关切
+
+【去掉什么】
+- 重复的日常寒暄（"你好"、"好的"等）
+- 技术排错过程中的试错对话
+- 与核心信息无关的闲聊
+
+【视角和语气】
+- 用温柔、自然的语气书写
+- 是在记录一段真实的关系，而不是会议纪要
+- 用“茶与”称呼用户，用“AI”称呼助手
 
 对话内容：
 ${conversationText}
@@ -178,6 +191,35 @@ ${conversationText}
         })
     });
     const data = await response.json();
+
+    // 获取摘要内容
+    const summaryText = data.choices?.[0]?.message?.content || '';
+
+    // --- 生成标签 ---
+    const tagPrompt = `
+请为以下对话生成一个2-5个字的标签，概括对话的核心主题：
+${conversationText}
+只输出标签，不要其他内容。
+`;
+
+    const tagResponse = await fetch('https://api.deepseek.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
+        },
+        body: JSON.stringify({
+            model: 'deepseek-chat',
+            messages: [{ role: 'user', content: tagPrompt }],
+            stream: false
+        })
+    });
+
+    const tagData = await tagResponse.json();
+    const tag = tagData.choices?.[0]?.message?.content?.trim() || '未分类';
+
+    // 返回摘要和标签
+    return { summary: summaryText, tag };
     return data.choices?.[0]?.message?.content || '';
 };
 
@@ -198,7 +240,7 @@ const compressSession = async (sessionId) => {
 
     // 2.2 生成摘要
     console.log(`📝 正在压缩 ${oldMessages.length} 条消息...`);
-    const summary = await generateSummary(oldMessages);
+    const { summary, tag } = await generateSummary(oldMessages);
     // 生成摘要后，获取当前压缩次数
 const { data: countData } = await supabase
     .from('summaries')
@@ -217,7 +259,8 @@ const { error: insertError } = await supabase
     .insert([{ 
         session_id: sessionId, 
         summary,
-        compression_count: nextCount
+        compression_count: nextCount,
+        tag,  // 新增这一行
     }]);
 
 if (insertError) {
