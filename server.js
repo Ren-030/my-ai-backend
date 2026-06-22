@@ -181,15 +181,15 @@ ${conversationText}
     return data.choices?.[0]?.message?.content || '';
 };
 
-// 2. 执行压缩（取前8条 → 生成摘要 → 存表 → 删除原消息）
+// 2. 执行压缩（取前20条 → 生成摘要 → 存表 → 删除原消息）
 const compressSession = async (sessionId) => {
-    // 2.1 取前 8 条消息（按时间升序）
+    // 2.1 取前 20 条消息（按时间升序）
     const { data: oldMessages, error: fetchError } = await supabase
         .from('messages')
         .select('id, role, content')
         .eq('session_id', sessionId)
         .order('created_at', { ascending: true })
-        .limit(8);
+        .limit(20);
 
     if (fetchError || !oldMessages || oldMessages.length === 0) {
         console.log('⚠️ 没有可压缩的消息');
@@ -199,6 +199,26 @@ const compressSession = async (sessionId) => {
     // 2.2 生成摘要
     console.log(`📝 正在压缩 ${oldMessages.length} 条消息...`);
     const summary = await generateSummary(oldMessages);
+    // 生成摘要后，获取当前压缩次数
+const { data: countData } = await supabase
+    .from('summaries')
+    .select('compression_count')
+    .eq('session_id', sessionId)
+    .order('compression_count', { ascending: false })
+    .limit(1);
+
+const nextCount = countData?.[0]?.compression_count !== undefined 
+    ? countData[0].compression_count + 1 
+    : 1;
+
+// 存入摘要时带上次数
+const { error: insertError } = await supabase
+    .from('summaries')
+    .insert([{ 
+        session_id: sessionId, 
+        summary,
+        compression_count: nextCount  // 新增这一行
+    }]);
 
     // 2.3 存入 summaries 表
     const { error: insertError } = await supabase
@@ -269,8 +289,8 @@ const { count, error: countError } = await supabase
 
 if (countError) {
     console.error('❌ 获取消息计数失败:', countError);
-} else if (count > 12) {
-    console.log(`📊 当前消息数 ${count}，超过 12 条，触发压缩...`);
+} else if (count > 50) {
+    console.log(`📊 当前消息数 ${count}，超过 50 条，触发压缩...`);
     await compressSession(sessionId);
 }
 
@@ -284,13 +304,13 @@ const { data: summaryData } = await supabase
 
 const summary = summaryData?.[0]?.summary || '';
 
-// 3. 拉取近期消息（只拉最近 4 条，因为更早的已被压缩或即将被压缩）
+// 3. 拉取近期消息（只拉最近 10 条，因为更早的已被压缩或即将被压缩）
 const { data: recentMessages } = await supabase
     .from('messages')
     .select('role, content')
     .eq('session_id', sessionId)
     .order('created_at', { ascending: true })
-    .limit(4);
+    .limit(10);
 
 // 4. 组装上下文
 // 注意：我们不再需要 `historyData` 了，直接用 summary + recentMessages 构造 messages 数组
