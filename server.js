@@ -217,18 +217,13 @@ const { error: insertError } = await supabase
     .insert([{ 
         session_id: sessionId, 
         summary,
-        compression_count: nextCount  // 新增这一行
+        compression_count: nextCount
     }]);
 
-    // 2.3 存入 summaries 表
-    const { error: insertError } = await supabase
-        .from('summaries')
-        .insert([{ session_id: sessionId, summary }]);
-
-    if (insertError) {
-        console.error('❌ 存储摘要失败:', insertError);
-        return;
-    }
+if (insertError) {
+    console.error('❌ 存储摘要失败:', insertError);
+    return;
+}
 
     // 2.4 删除被压缩的原始消息
     const idsToDelete = oldMessages.map(m => m.id);
