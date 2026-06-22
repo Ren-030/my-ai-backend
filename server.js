@@ -318,12 +318,6 @@ if (summary) {
 // 添加当前用户消息
 chatMessages.push({ role: 'user', content: message });
 
-// 构建历史消息数组（将数据库中的 'ai' 转换为 API 需要的 'assistant'）
-const historyMessages = historyData ? historyData.map(msg => ({
-    role: msg.role === 'ai' ? 'assistant' : msg.role,
-    content: msg.content
-})) : [];
-
         // --- 2. 保存用户消息到 Supabase ---
         const { error: userError } = await supabase
             .from('messages')
