@@ -145,6 +145,86 @@ app.delete('/sessions/:sessionId', async (req, res) => {
     res.json({ success: true });
 });
 
+// ---------- 上下文压缩工具函数 ----------
+
+// 1. 生成摘要（调用 DeepSeek）
+const generateSummary = async (messages) => {
+    const conversationText = messages.map(m => 
+        `${m.role === 'user' ? '用户' : 'AI'}：${m.content}`
+    ).join('\n');
+
+    const prompt = `
+请将以下对话压缩成一段300-500字的摘要，包含以下四个部分：
+
+【用户信息】
+【重要事实】
+【当前任务】
+【未完成事项】
+
+对话内容：
+${conversationText}
+`;
+
+    const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
+        },
+        body: JSON.stringify({
+            model: 'deepseek-chat',
+            messages: [{ role: 'user', content: prompt }],
+            stream: false
+        })
+    });
+    const data = await response.json();
+    return data.choices?.[0]?.message?.content || '';
+};
+
+// 2. 执行压缩（取前8条 → 生成摘要 → 存表 → 删除原消息）
+const compressSession = async (sessionId) => {
+    // 2.1 取前 8 条消息（按时间升序）
+    const { data: oldMessages, error: fetchError } = await supabase
+        .from('messages')
+        .select('id, role, content')
+        .eq('session_id', sessionId)
+        .order('created_at', { ascending: true })
+        .limit(8);
+
+    if (fetchError || !oldMessages || oldMessages.length === 0) {
+        console.log('⚠️ 没有可压缩的消息');
+        return;
+    }
+
+    // 2.2 生成摘要
+    console.log(`📝 正在压缩 ${oldMessages.length} 条消息...`);
+    const summary = await generateSummary(oldMessages);
+
+    // 2.3 存入 summaries 表
+    const { error: insertError } = await supabase
+        .from('summaries')
+        .insert([{ session_id: sessionId, summary }]);
+
+    if (insertError) {
+        console.error('❌ 存储摘要失败:', insertError);
+        return;
+    }
+
+    // 2.4 删除被压缩的原始消息
+    const idsToDelete = oldMessages.map(m => m.id);
+    const { error: deleteError } = await supabase
+        .from('messages')
+        .delete()
+        .in('id', idsToDelete);
+
+    if (deleteError) {
+        console.error('❌ 删除原始消息失败:', deleteError);
+        return;
+    }
+
+    console.log(`✅ 压缩完成，已删除 ${idsToDelete.length} 条消息，摘要已保存`);
+};
+
 // ========================
 // 4. 核心：AI 对话接口（支持多模型）
 // ========================
@@ -179,13 +259,64 @@ if (req.body.system_prompt && req.body.temperature !== undefined) {
     temperature = settings.temperature;
     maxTokens = settings.max_tokens;
 }
-        // --- 1.5 拉取最近的历史消息（用于上下文） ---
-const { data: historyData } = await supabase
+    // --- 1.5 上下文压缩与近期消息拉取 ---
+
+// 1. 检查当前会话的消息总数，判断是否需要压缩
+const { count, error: countError } = await supabase
+    .from('messages')
+    .select('*', { count: 'exact', head: true })
+    .eq('session_id', sessionId);
+
+if (countError) {
+    console.error('❌ 获取消息计数失败:', countError);
+} else if (count > 12) {
+    console.log(`📊 当前消息数 ${count}，超过 12 条，触发压缩...`);
+    await compressSession(sessionId);
+}
+
+// 2. 拉取最新的摘要（如果有）
+const { data: summaryData } = await supabase
+    .from('summaries')
+    .select('summary')
+    .eq('session_id', sessionId)
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+const summary = summaryData?.[0]?.summary || '';
+
+// 3. 拉取近期消息（只拉最近 4 条，因为更早的已被压缩或即将被压缩）
+const { data: recentMessages } = await supabase
     .from('messages')
     .select('role, content')
     .eq('session_id', sessionId)
     .order('created_at', { ascending: true })
-    .limit(20); // 取最近20条消息（约10轮对话）
+    .limit(4);
+
+// 4. 组装上下文
+// 注意：我们不再需要 `historyData` 了，直接用 summary + recentMessages 构造 messages 数组
+// 但 messages 数组的构造会在原有代码中靠后的位置进行，所以这里只负责获取数据。
+// 不过为了减少混淆，我们可以把原有的 messages 构造逻辑也一并替换。
+
+// 实际上，你原本代码里在调用 AI API 时，会使用一个 `messages` 变量。
+// 我们现在就用新的数据来构造它。
+const chatMessages = [
+    { role: 'system', content: systemPrompt },
+];
+
+if (summary) {
+    chatMessages.push({ role: 'system', content: `【历史摘要】\n${summary}` });
+}
+
+// 添加近期消息（注意转换 role）
+(recentMessages || []).forEach(msg => {
+    chatMessages.push({
+        role: msg.role === 'ai' ? 'assistant' : msg.role,
+        content: msg.content
+    });
+});
+
+// 添加当前用户消息
+chatMessages.push({ role: 'user', content: message });
 
 // 构建历史消息数组（将数据库中的 'ai' 转换为 API 需要的 'assistant'）
 const historyMessages = historyData ? historyData.map(msg => ({
@@ -233,14 +364,10 @@ const historyMessages = historyData ? historyData.map(msg => ({
             },
             body: JSON.stringify({
                 model: modelName,
-                messages: [
-                  { role: 'system', content: systemPrompt },
-                ...historyMessages,  // 展开历史消息
-                  { role: 'user', content: message }  // 当前消息放在最后
-        ],
-        stream: false,
-        temperature: temperature,
-        max_tokens: maxTokens
+                messages: chatMessages,  // 直接使用我们构造好的数组
+                stream: false,
+                temperature: temperature,
+                max_tokens: maxTokens
             })
         });
 
