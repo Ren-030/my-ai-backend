@@ -458,19 +458,6 @@ chatMessages.push({ role: 'user', content: message });
             console.log('✅ 用户消息已存入 Supabase');
         }
 
-        // --- 新增：尝试提取长期记忆 ---
-try {
-    const memory = await extractMemories(message, reply);
-    if (memory) {
-        await supabase
-            .from('memories')
-            .insert([{ content: memory }]);
-        console.log('🧠 长期记忆已提取:', memory);
-    }
-} catch (error) {
-    console.error('❌ 记忆提取失败:', error.message);
-}
-
         // --- 3. 根据模型选择 API 地址和 Key ---
         let apiUrl, apiKey, modelName;
         if (model === 'claude') {
@@ -526,6 +513,19 @@ try {
         } else {
             console.log('✅ AI 回复已存入 Supabase');
         }
+
+        // --- 新增：尝试提取长期记忆 ---
+try {
+    const memory = await extractMemories(message, reply);
+    if (memory) {
+        await supabase
+            .from('memories')
+            .insert([{ content: memory }]);
+        console.log('🧠 长期记忆已提取:', memory);
+    }
+} catch (error) {
+    console.error('❌ 记忆提取失败:', error.message);
+}
 
         res.json({ reply });
 
