@@ -313,6 +313,21 @@ if (req.body.system_prompt && req.body.temperature !== undefined) {
     temperature = settings.temperature;
     maxTokens = settings.max_tokens;
 }
+
+// --- 在 systemPrompt 之后，摘要之前插入 ---
+// 获取所有长期记忆
+const { data: memoriesData } = await supabase
+    .from('memories')
+    .select('content');
+
+if (memoriesData && memoriesData.length > 0) {
+    const memoriesText = memoriesData.map(m => `- ${m.content}`).join('\n');
+    chatMessages.push({ 
+        role: 'system', 
+        content: `【茶与的重要信息】\n${memoriesText}\n请在所有对话中记住这些关于茶与的信息。` 
+    });
+}
+
     // --- 1.5 上下文压缩与近期消息拉取 ---
 
 // 1. 检查当前会话的消息总数，判断是否需要压缩
@@ -456,6 +471,34 @@ chatMessages.push({ role: 'user', content: message });
         console.error('❌ 请求处理失败:', error.message);
         res.status(500).json({ error: 'AI 服务暂时不可用，请稍后再试。' });
     }
+});
+
+// 添加长期记忆
+app.post('/memories', async (req, res) => {
+    const { content } = req.body;
+    if (!content || content.trim() === '') {
+        return res.status(400).json({ error: '记忆内容不能为空' });
+    }
+    const { error } = await supabase
+        .from('memories')
+        .insert([{ content: content.trim() }]);
+    if (error) {
+        console.error('❌ 保存记忆失败:', error);
+        return res.status(500).json({ error: error.message });
+    }
+    res.json({ success: true });
+});
+// 获取所有长期记忆
+app.get('/memories', async (req, res) => {
+    const { data, error } = await supabase
+        .from('memories')
+        .select('content')
+        .order('created_at', { ascending: false });
+    if (error) {
+        console.error('❌ 获取记忆失败:', error);
+        return res.status(500).json({ error: error.message });
+    }
+    res.json(data);
 });
 
 // ========================
