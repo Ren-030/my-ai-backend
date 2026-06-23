@@ -279,6 +279,53 @@ if (insertError) {
     console.log(`✅ 压缩完成，已删除 ${idsToDelete.length} 条消息，摘要已保存`);
 };
 
+// 记忆判断器：从对话中提取值得长期记住的信息
+const extractMemories = async (userMessage, aiReply) => {
+    const prompt = `
+请判断以下对话中，是否存在值得长期记住的信息。
+
+【用户说】：${userMessage}
+【AI 回复】：${aiReply}
+
+【判断标准】
+- 如果用户提到了关于自己的事实（如：名字、喜好、习惯、重要的人或物、生活状态、情绪倾向），提取并记录下来。
+- 如果用户提到了关于你们之间关系的事实（如：对方的重要信息、共同的约定、关系状态），提取并记录下来。
+- 如果只是日常闲聊、技术排错、或者信息已经在之前的记忆中存过了，则不需要提取。
+
+【提取格式】
+- 如果值得记住，返回一个简洁的句子，包含事实本身。
+- 如果不值得记住，返回 "NO_MEMORY"。
+
+【例子】
+用户说："我叫茶与，我正在开发一个AI项目。"
+→ 提取为："用户名叫茶与，正在开发AI项目。"
+
+用户说："今天天气真好。"（闲聊）→ NO_MEMORY
+
+对话内容：
+用户说：${userMessage}
+AI说：${aiReply}
+`;
+
+    const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
+        },
+        body: JSON.stringify({
+            model: 'deepseek-chat',
+            messages: [{ role: 'user', content: prompt }],
+            stream: false,
+            temperature: 0.3  // 低温度，提高判断的稳定性
+        })
+    });
+
+    const data = await response.json();
+    const result = data.choices?.[0]?.message?.content?.trim() || 'NO_MEMORY';
+    return result === 'NO_MEMORY' ? null : result;
+};
+
 // ========================
 // 4. 核心：AI 对话接口（支持多模型）
 // ========================
@@ -410,6 +457,19 @@ chatMessages.push({ role: 'user', content: message });
         } else {
             console.log('✅ 用户消息已存入 Supabase');
         }
+
+        // --- 新增：尝试提取长期记忆 ---
+try {
+    const memory = await extractMemories(message, reply);
+    if (memory) {
+        await supabase
+            .from('memories')
+            .insert([{ content: memory }]);
+        console.log('🧠 长期记忆已提取:', memory);
+    }
+} catch (error) {
+    console.error('❌ 记忆提取失败:', error.message);
+}
 
         // --- 3. 根据模型选择 API 地址和 Key ---
         let apiUrl, apiKey, modelName;
