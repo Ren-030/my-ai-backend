@@ -315,7 +315,12 @@ if (req.body.system_prompt && req.body.temperature !== undefined) {
 }
 
 // --- 在 systemPrompt 之后，摘要之前插入 ---
-// 获取所有长期记忆
+//  先定义 chatMessages
+const chatMessages = [
+    { role: 'system', content: systemPrompt },
+];
+
+// 再获取所有长期记忆
 const { data: memoriesData } = await supabase
     .from('memories')
     .select('content');
@@ -368,9 +373,6 @@ const { data: recentMessages } = await supabase
 
 // 实际上，你原本代码里在调用 AI API 时，会使用一个 `messages` 变量。
 // 我们现在就用新的数据来构造它。
-const chatMessages = [
-    { role: 'system', content: systemPrompt },
-];
 
 if (summary) {
     chatMessages.push({
