@@ -403,10 +403,27 @@ const { data: memoriesData } = await supabase
     .select('content');
 
 if (memoriesData && memoriesData.length > 0) {
-    const memoriesText = memoriesData.map(m => `- ${m.content}`).join('\n');
-    chatMessages.push({ 
-        role: 'system', 
-        content: `【茶与的重要信息】\n${memoriesText}\n请在所有对话中记住这些关于茶与的信息。` 
+    const memoriesText = memoriesData
+        .map(m => `- ${m.content}`)
+        .join('\n');
+
+    chatMessages.push({
+        role: 'system',
+        content: `【长期记忆】
+
+以下是用户的一些背景信息：
+
+${memoriesText}
+
+这些信息仅在相关时参考。
+
+不要主动重复所有记忆。
+
+不要为了提及记忆而提及记忆。
+
+优先回应用户当前的话题和最新消息。
+
+只有在自然相关时，才引用这些信息。`
     });
 }
 
