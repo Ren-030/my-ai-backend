@@ -401,7 +401,7 @@ const chatMessages = [
 const { data: memoriesData } = await supabase
     .from('memories')
     .select('content');
-
+/*
 if (memoriesData && memoriesData.length > 0) {
     const memoriesText = memoriesData
         .map(m => `- ${m.content}`)
@@ -426,7 +426,7 @@ ${memoriesText}
 只有在自然相关时，才引用这些信息。`
     });
 }
-
+*/
     // --- 1.5 上下文压缩与近期消息拉取 ---
 
 // 1. 检查当前会话的消息总数，判断是否需要压缩
