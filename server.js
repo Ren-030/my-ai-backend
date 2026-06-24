@@ -618,7 +618,7 @@ try {
 
 // 添加长期记忆
 app.post('/memories', async (req, res) => {
-    const { content } = req.body;
+    const { content, keywords = [] } = req.body;
     if (!content || content.trim() === '') {
         return res.status(400).json({ error: '记忆内容不能为空' });
     }
