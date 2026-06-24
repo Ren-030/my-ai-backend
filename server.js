@@ -309,28 +309,18 @@ ${aiReply}
 - 技术排错过程
 
 【输出要求】
+- 如果值得记住，返回一个 JSON 对象，包含两个字段：
+  - content：记忆内容（简洁的句子）
+  - keywords：关键词数组（2-4个，用于检索）
+- 如果不值得记住，只返回：NO_MEMORY
 
-必须使用第三人称。
-
-必须明确指出是“用户”。
-
-禁止使用“我”。
-
-禁止使用第一人称。
 
 【输出示例】
+用户说："我叫茶与，我喜欢喝红茶。"
+→ 返回：{"content": "茶与喜欢喝红茶", "keywords": ["红茶", "茶", "茶与"]}
 
-用户叫茶与。
-
-用户正在开发AI聊天网页。
-
-用户养了一只名叫麦麦的猫。
-
-用户喜欢喝乌龙茶。
-
-如果没有值得记住的信息，只返回：
-
-NO_MEMORY
+用户说："今天天气真好。"
+→ 返回：NO_MEMORY
 
 对话内容：
 用户说：${userMessage}
@@ -353,7 +343,14 @@ AI说：${aiReply}
 
     const data = await response.json();
     const result = data.choices?.[0]?.message?.content?.trim() || 'NO_MEMORY';
-    return result === 'NO_MEMORY' ? null : result;
+    if (result === 'NO_MEMORY') return null;
+try {
+    const parsed = JSON.parse(result);
+    return parsed; // { content: "...", keywords: [...] }
+} catch {
+    // 如果返回的不是 JSON 格式，按纯文本处理
+    return { content: result, keywords: [] };
+}
 };
 
 // ========================
@@ -482,6 +479,42 @@ ${summary}
 3. 时间、天气、日期、当前状态等信息，请以最新对话内容为准。
 `
     });
+}
+// 关键词检索：取出相关的长期记忆，push 到 chatMessages 里
+// 1. 从用户消息中提取关键词（简单分词 + 过滤短词）
+const userWords = message
+    .split(/[\s,，。！？、；：""''（）\n]+/)  // 按空格和常见标点切分
+    .filter(word => word.length > 1);          // 过滤掉单字词
+
+// 2. 从数据库读取所有记忆（含 keywords）
+const { data: allMemories } = await supabase
+    .from('memories')
+    .select('content, keywords');
+
+if (allMemories && allMemories.length > 0) {
+    // 3. 筛选相关记忆：用户消息中的词 与 记忆的 keywords 有交集
+    const relevantMemories = allMemories.filter(m => {
+        if (!m.keywords || m.keywords.length === 0) return false;
+        return m.keywords.some(kw => userWords.some(word => 
+            word.includes(kw) || kw.includes(word)  // 部分匹配
+        ));
+    });
+
+    // 4. 如果有相关记忆，注入到上下文中
+    if (relevantMemories.length > 0) {
+        const memoryText = relevantMemories
+            .map(m => `- ${m.content}`)
+            .join('\n');
+        chatMessages.push({
+            role: 'system',
+            content: `【与当前话题相关的记忆】\n${memoryText}\n只参考这些信息，不要主动提起“记忆”这个词。`
+        });
+        console.log(`🧠 注入了 ${relevantMemories.length} 条相关记忆`);
+    } else {
+        console.log('🧠 没有找到相关记忆，本次不注入');
+    }
+} else {
+    console.log('🧠 memories 表为空，跳过注入');
 }
 
 // 添加近期消息（注意转换 role）
