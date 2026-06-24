@@ -515,6 +515,7 @@ if (allMemories && allMemories.length > 0) {
     }
 } else {
     console.log('🧠 memories 表为空，跳过注入');
+    console.log('🔍 开始执行关键词检索...');
 }
 
 // 添加近期消息（注意转换 role）
