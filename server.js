@@ -622,9 +622,16 @@ app.post('/memories', async (req, res) => {
     if (!content || content.trim() === '') {
         return res.status(400).json({ error: '记忆内容不能为空' });
     }
+    // 如果前端没有传 keywords，自动生成一个简单的关键词数组
+    let finalKeywords = keywords;
+    if (!finalKeywords || finalKeywords.length === 0) {
+        // 简单提取：取内容中的名词（这里用空格分词做演示）
+        const words = content.split(/[\s,，。！？、；：""''（）\n]+/).filter(w => w.length > 1);
+        finalKeywords = words.slice(0, 3); // 取前3个
+    }
     const { error } = await supabase
         .from('memories')
-        .insert([{ content: content.trim() }]);
+        .insert([{ content: content.trim(), keywords: finalKeywords }]);
     if (error) {
         console.error('❌ 保存记忆失败:', error);
         return res.status(500).json({ error: error.message });
