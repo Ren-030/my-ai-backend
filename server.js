@@ -440,14 +440,14 @@ if (countError) {
 }
 
 // 2. 拉取最新的摘要（如果有）
-const { data: summaryData } = await supabase
-    .from('summaries')
-    .select('summary')
-    .eq('session_id', sessionId)
-    .order('created_at', { ascending: false })
-    .limit(1);
+//const { data: summaryData } = await supabase
+//    .from('summaries')
+//    .select('summary')
+//   .eq('session_id', sessionId)
+//    .order('created_at', { ascending: false })
+//    .limit(1);
 
-const summary = summaryData?.[0]?.summary || '';
+//const summary = summaryData?.[0]?.summary || '';
 
 // 3. 拉取近期消息（只拉最近 10 条，因为更早的已被压缩或即将被压缩）
 const { data: recentMessages } = await supabase
@@ -497,7 +497,10 @@ let relevantMemories = [];
 
 if (allMemories && allMemories.length > 0) {
     relevantMemories = allMemories.filter(m => {
-        if (!Array.isArray(m.keywords)) return false;
+
+        if (!Array.isArray(m.keywords) || m.keywords.length === 0) {
+        return false;
+        }
 
         return m.keywords.some(kw =>
             userWords.some(word =>
@@ -613,16 +616,14 @@ try {
 
 // 添加长期记忆
 app.post('/memories', async (req, res) => {
-    const { content, keywords = [] } = req.body;
-    if (!content || content.trim() === '') {
-        return res.status(400).json({ error: '记忆内容不能为空' });
-    }
-    // 如果前端没有传 keywords，自动生成一个简单的关键词数组
-    let finalKeywords = keywords;
+const { content, keywords } = req.body;
 
-    if (!Array.isArray(finalKeywords) || finalKeywords.length === 0) {
-    finalKeywords = [];
-    }
+if (!content || content.trim() === '') {
+    return res.status(400).json({ error: '记忆内容不能为空' });
+}
+
+const finalKeywords = Array.isArray(keywords) ? keywords : [];
+
     const { error } = await supabase
         .from('memories')
         .insert([{ content: content.trim(), keywords: finalKeywords }]);
