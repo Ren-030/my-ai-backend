@@ -512,11 +512,22 @@ if (allMemories && allMemories.length > 0) {
     });
 
     if (relevantMemories.length > 0) {
+    const memoryText = relevantMemories
+        .map(m => `- ${m.content}`)
+        .join('\n');
+
     console.log(`🧠 注入了 ${relevantMemories.length} 条相关记忆`);
     console.log('🧠 命中的记忆内容:', JSON.stringify(relevantMemories));
-    } else {
-        console.log('🧠 没有找到相关记忆，本次不注入');
-    }
+
+    chatMessages.push({
+        role: 'system',
+        content: `【与当前话题相关的记忆】
+
+        ${memoryText}
+
+        请在回答用户问题时优先使用这些事实，不要猜测。`
+             });
+        }
 }
 
 // 添加近期消息（注意转换 role）
