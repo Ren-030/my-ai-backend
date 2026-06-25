@@ -448,6 +448,7 @@ if (countError) {
 //    .limit(1);
 
 //const summary = summaryData?.[0]?.summary || '';
+      const summary = '';
 
 // 3. 拉取近期消息（只拉最近 10 条，因为更早的已被压缩或即将被压缩）
 const { data: recentMessages } = await supabase
