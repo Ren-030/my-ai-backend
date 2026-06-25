@@ -395,6 +395,7 @@ const chatMessages = [
 ];
 
 // 再获取所有长期记忆
+//旧版全量长期记忆注入,6月25日停用，原因：与关键词检索版冲突，导致每轮注入全部记忆
 /*const { data: memoriesData } = await supabase
     .from('memories')
     .select('content');
@@ -441,15 +442,14 @@ if (countError) {
 }
 
 // 2. 拉取最新的摘要（如果有）
-//const { data: summaryData } = await supabase
-//    .from('summaries')
-//    .select('summary')
-//   .eq('session_id', sessionId)
-//    .order('created_at', { ascending: false })
-//    .limit(1);
+const { data: summaryData } = await supabase
+    .from('summaries')
+    .select('summary')
+    .eq('session_id', sessionId)
+    .order('created_at', { ascending: false })
+    .limit(1);
 
-//const summary = summaryData?.[0]?.summary || '';
-const summary = '';
+const summary = summaryData?.[0]?.summary || '';
 
 // 3. 拉取近期消息（只拉最近 10 条，因为更早的已被压缩或即将被压缩）
 const { data: recentMessages } = await supabase
