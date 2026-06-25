@@ -483,39 +483,40 @@ ${summary}
 // 关键词检索：取出相关的长期记忆，push 到 chatMessages 里
 // 1. 从用户消息中提取关键词（简单分词 + 过滤短词）
 const userWords = message
-    .split(/[\s,，。！？、；：""''（）\n]+/)  // 按空格和常见标点切分
-    .filter(word => word.length > 1);          // 过滤掉单字词
+  .toLowerCase()
+  .replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, " ")
+  .split(" ")
+  .filter(Boolean);
 
 // 2. 从数据库读取所有记忆（含 keywords）
 const { data: allMemories } = await supabase
     .from('memories')
     .select('content, keywords');
 
+const userWords = message
+  .toLowerCase()
+  .replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, " ")
+  .split(" ")
+  .filter(Boolean);
+
+let relevantMemories = [];
+
 if (allMemories && allMemories.length > 0) {
-    // 3. 筛选相关记忆：用户消息中的词 与 记忆的 keywords 有交集
-    const relevantMemories = allMemories.filter(m => {
-        if (!m.keywords || m.keywords.length === 0) return false;
-        return m.keywords.some(kw => userWords.some(word => 
-            word.includes(kw) || kw.includes(word)  // 部分匹配
-        ));
+    relevantMemories = allMemories.filter(m => {
+        if (!Array.isArray(m.keywords)) return false;
+
+        return m.keywords.some(kw =>
+            userWords.some(word =>
+                word.includes(kw) || kw.includes(word)
+            )
+        );
     });
 
-    // 4. 如果有相关记忆，注入到上下文中
     if (relevantMemories.length > 0) {
-        const memoryText = relevantMemories
-            .map(m => `- ${m.content}`)
-            .join('\n');
-        chatMessages.push({
-            role: 'system',
-            content: `【与当前话题相关的记忆】\n${memoryText}\n只参考这些信息，不要主动提起“记忆”这个词。`
-        });
-        console.log(`🧠 注入了 ${relevantMemories.length} 条相关记忆`);
+        console.log(`🧠 注入 ${relevantMemories.length} 条记忆`);
     } else {
         console.log('🧠 没有找到相关记忆，本次不注入');
     }
-} else {
-    console.log('🧠 memories 表为空，跳过注入');
-    console.log('🔍 开始执行关键词检索...');
 }
 
 // 添加近期消息（注意转换 role）
@@ -624,10 +625,9 @@ app.post('/memories', async (req, res) => {
     }
     // 如果前端没有传 keywords，自动生成一个简单的关键词数组
     let finalKeywords = keywords;
-    if (!finalKeywords || finalKeywords.length === 0) {
-        // 简单提取：取内容中的名词（这里用空格分词做演示）
-        const words = content.split(/[\s,，。！？、；：""''（）\n]+/).filter(w => w.length > 1);
-        finalKeywords = words.slice(0, 3); // 取前3个
+
+    if (!Array.isArray(finalKeywords) || finalKeywords.length === 0) {
+    finalKeywords = [];
     }
     const { error } = await supabase
         .from('memories')
