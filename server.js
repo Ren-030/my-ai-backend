@@ -482,13 +482,7 @@ ${summary}
 }
 // 关键词检索：取出相关的长期记忆，push 到 chatMessages 里
 // 1. 从用户消息中提取关键词（简单分词 + 过滤短词）
-const userWords = message
-  .toLowerCase()
-  .replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, " ")
-  .split(" ")
-  .filter(Boolean);
-
-// 2. 从数据库读取所有记忆（含 keywords）
+//    从数据库读取所有记忆（含 keywords）
 const { data: allMemories } = await supabase
     .from('memories')
     .select('content, keywords');
