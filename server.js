@@ -512,7 +512,7 @@ if (allMemories && allMemories.length > 0) {
     });
 
     if (relevantMemories.length > 0) {
-        console.log(`🧠 注入 ${relevantMemories.length} 条记忆`);
+        console.log(`🧠 注入了 ${relevantMemories.length} 条记忆`);
     } else {
         console.log('🧠 没有找到相关记忆，本次不注入');
     }
