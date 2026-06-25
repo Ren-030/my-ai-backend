@@ -395,7 +395,7 @@ const chatMessages = [
 ];
 
 // 再获取所有长期记忆
-const { data: memoriesData } = await supabase
+/*const { data: memoriesData } = await supabase
     .from('memories')
     .select('content');
 
@@ -404,6 +404,7 @@ if (memoriesData && memoriesData.length > 0) {
         .map(m => `- ${m.content}`)
         .join('\n');
 
+console.log("🧠 MEMORIES INJECTED:", memoryText);
     chatMessages.push({
         role: 'system',
         content: `【长期记忆】
@@ -422,7 +423,7 @@ ${memoriesText}
 
 只有在自然相关时，才引用这些信息。`
     });
-}
+}*/
 
     // --- 1.5 上下文压缩与近期消息拉取 ---
 
@@ -448,7 +449,7 @@ if (countError) {
 //    .limit(1);
 
 //const summary = summaryData?.[0]?.summary || '';
-      const summary = '';
+const summary = '';
 
 // 3. 拉取近期消息（只拉最近 10 条，因为更早的已被压缩或即将被压缩）
 const { data: recentMessages } = await supabase
