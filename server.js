@@ -598,10 +598,17 @@ chatMessages.push({ role: 'user', content: message });
         // --- 新增：尝试提取长期记忆 ---
 try {
     const memory = await extractMemories(message, reply);
+
     if (memory) {
         await supabase
             .from('memories')
-            .insert([{ content: memory }]);
+            .insert([
+                {
+                    content: memory.content,
+                    keywords: memory.keywords
+                }
+            ]);
+
         console.log('🧠 长期记忆已提取:', memory);
     }
 } catch (error) {
