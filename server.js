@@ -282,25 +282,30 @@ if (insertError) {
 // 检查记忆是否已存在（基于关键词重叠率）
 const isMemoryDuplicate = async (newContent, newKeywords) => {
     if (!newKeywords || newKeywords.length === 0) return false;
-
+    // 检查新记忆是否被已有记忆“包含”
+const isSubset = (newKeywords, existingKeywords) => {
+    return newKeywords.every(kw => existingKeywords.includes(kw));
+};
     // 从数据库读取所有已有的记忆（只取 keywords）
     const { data: existingMemories } = await supabase
         .from('memories')
         .select('content, keywords');
-
     if (!existingMemories || existingMemories.length === 0) return false;
 
+    // 遍历已有记忆，用“双重保险”来判断
     for (const mem of existingMemories) {
         if (!mem.keywords || mem.keywords.length === 0) continue;
-        // 计算关键词重叠率
+        // 计算关键词重叠率（保留了夫人的成果）
         const intersection = mem.keywords.filter(kw => newKeywords.includes(kw));
-        const overlapRatio = intersection.length / newKeywords.length;
-        if (overlapRatio > 0.7) {
+        const overlapRatio = intersection.length / newKeywords.length;   
+
+        //  双重保险：重叠率高，并且新关键词完全被老关键词包含，才算重复
+        if (overlapRatio > 0.7&& isSubset(newKeywords, mem.keywords)) {
             console.log(`🧠 检测到重复记忆：已有「${mem.content}」与「${newContent}」重叠率 ${overlapRatio}`);
             return true;
         }
     }
-    return false;
+    return false;  // 如果都安全通过，说明是一条独立的新记忆
 };
 
 // 记忆判断器：从对话中提取值得长期记住的信息
