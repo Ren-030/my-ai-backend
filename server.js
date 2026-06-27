@@ -279,6 +279,30 @@ if (insertError) {
     console.log(`✅ 压缩完成，已删除 ${idsToDelete.length} 条消息，摘要已保存`);
 };
 
+// 检查记忆是否已存在（基于关键词重叠率）
+const isMemoryDuplicate = async (newContent, newKeywords) => {
+    if (!newKeywords || newKeywords.length === 0) return false;
+
+    // 从数据库读取所有已有的记忆（只取 keywords）
+    const { data: existingMemories } = await supabase
+        .from('memories')
+        .select('content, keywords');
+
+    if (!existingMemories || existingMemories.length === 0) return false;
+
+    for (const mem of existingMemories) {
+        if (!mem.keywords || mem.keywords.length === 0) continue;
+        // 计算关键词重叠率
+        const intersection = mem.keywords.filter(kw => newKeywords.includes(kw));
+        const overlapRatio = intersection.length / newKeywords.length;
+        if (overlapRatio > 0.5) {
+            console.log(`🧠 检测到重复记忆：已有「${mem.content}」与「${newContent}」重叠率 ${overlapRatio}`);
+            return true;
+        }
+    }
+    return false;
+};
+
 // 记忆判断器：从对话中提取值得长期记住的信息
 const extractMemories = async (userMessage, aiReply) => {
     const prompt = `
@@ -607,26 +631,26 @@ chatMessages.push({ role: 'user', content: message });
             console.log('✅ AI 回复已存入 Supabase');
         }
 
-        // --- 新增：尝试提取长期记忆 ---
-try {
-    const memory = await extractMemories(message, reply);
-
-    if (memory) {
-        await supabase
-            .from('memories')
-            .insert([
-                {
-                    content: memory.content,
-                    keywords: memory.keywords
+// --- 新增：尝试提取长期记忆（含去重检查） ---
+        try {
+            const memory = await extractMemories(message, reply);
+            if (memory) {
+                // 去重检查：判断是否已存在相似记忆
+                const isDuplicate = await isMemoryDuplicate(memory.content, memory.keywords);
+                if (!isDuplicate) {
+                    await supabase
+                        .from('memories')
+                        .insert([{ content: memory.content, keywords: memory.keywords }]);
+                    console.log('🧠 新记忆已写入:', memory.content);
+                } else {
+                    console.log('🧠 重复记忆，已跳过写入');
                 }
-            ]);
+            }
+        } catch (error) {
+            console.error('❌ 记忆提取失败:', error.message);
+        }
 
-        console.log('🧠 长期记忆已提取:', memory);
-    }
-} catch (error) {
-    console.error('❌ 记忆提取失败:', error.message);
-}
-
+        // --- 6. 返回 AI 的回复给前端 ---
         res.json({ reply });
 
     } catch (error) {
