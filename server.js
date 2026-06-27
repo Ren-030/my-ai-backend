@@ -295,7 +295,7 @@ const isMemoryDuplicate = async (newContent, newKeywords) => {
         // 计算关键词重叠率
         const intersection = mem.keywords.filter(kw => newKeywords.includes(kw));
         const overlapRatio = intersection.length / newKeywords.length;
-        if (overlapRatio > 0.5) {
+        if (overlapRatio > 0.7) {
             console.log(`🧠 检测到重复记忆：已有「${mem.content}」与「${newContent}」重叠率 ${overlapRatio}`);
             return true;
         }
