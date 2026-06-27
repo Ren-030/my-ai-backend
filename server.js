@@ -297,9 +297,24 @@ const isSubset = (newKeywords, existingKeywords) => {
         if (!mem.keywords || mem.keywords.length === 0) continue;
         // 计算关键词重叠率（保留了夫人的成果）
         const intersection = mem.keywords.filter(kw => newKeywords.includes(kw));
-        const overlapRatio = intersection.length / newKeywords.length;   
+        const overlapRatio = intersection.length / newKeywords.length;
+        
+   if (overlapRatio > 0.7) {
+    // 检查内容是否完全相同
+    if (mem.content === newContent) {
+        console.log('🧠 完全相同的记忆，跳过写入');
+        return true;
+    }
+    // 如果内容不同，但高度相关 → 执行更新
+    console.log(`🔄 更新记忆：将「${mem.content}」更新为「${newContent}」`);
+    await supabase
+        .from('memories')
+        .update({ content: newContent, keywords: newKeywords })
+        .eq('id', mem.id);
+        return true; // 已处理，不需要再写入
+        }   
 
-        //  双重保险：重叠率高，并且新关键词完全被老关键词包含，才算重复
+        //  子集包含检查：重叠率高，并且新关键词完全被老关键词包含，才算重复
         if (overlapRatio > 0.7&& isSubset(newKeywords, mem.keywords)) {
             console.log(`🧠 检测到重复记忆：已有「${mem.content}」与「${newContent}」重叠率 ${overlapRatio}`);
             return true;
