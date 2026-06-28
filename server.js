@@ -294,6 +294,18 @@ const isMemoryDuplicate = async (newContent, newKeywords) => {
     '宠物', '动物', '东西', '事情' // 新增泛化词
      ];
 
+    const normalize = kw => {
+    let word = kw.replace(/^小/, '').replace(/^大/, '').trim();
+    // 同义词映射
+    const synonymMap = {
+        '狗狗': '狗',
+        '猫猫': '猫',
+        '兔兔': '兔',
+        '仓鼠': '仓鼠', // 保持不变
+    };
+        return synonymMap[word] || word;
+    };
+
     // 短句对长句的包含检查
     const isShortContainedInLong = (short, long) => {
     return short.every(kw => long.includes(kw));
