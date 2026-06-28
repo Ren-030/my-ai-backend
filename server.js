@@ -321,10 +321,6 @@ const isMemoryDuplicate = async (newContent, newKeywords) => {
     const filteredOld = mem.keywords
         .map(normalize)
         .filter(kw => kw.length > 1 && !STOPWORDS.includes(kw));
-
-    const filteredOld = mem.keywords
-        .map(normalize)
-        .filter(kw => kw.length > 1 && !STOPWORDS.includes(kw));
         console.log('🔍 旧记忆关键词（过滤后）:', filteredOld);
 
          // 如果新关键词过滤后是旧关键词的子集 → 去重
