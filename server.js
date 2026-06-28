@@ -327,14 +327,14 @@ const isShortContainedInLong = (short, long) => {
     .filter(kw => kw.length > 1 && !STOPWORDS.includes(kw));
 
         // 第二重：不依赖阈值的双向子集包含检查（替换原来的旧逻辑）
-        const newNormalized = newKeywords.map(normalize);
-        const oldNormalized = mem.keywords.map(normalize);
-        const isContained = newNormalized.every(kw => oldNormalized.includes(kw));
-        if (isContained) {
-            console.log(`🧠 归一化后完全包含：新关键词是旧关键词的子集 → 判定为重复`);
-            return true;
+        if (filteredNew.length > 0 && filteredOld.length > 0) {
+            const newIsSubset = isShortContainedInLong(filteredNew, filteredOld);
+            const oldIsSubset = isShortContainedInLong(filteredOld, filteredNew);
+            if (newIsSubset || oldIsSubset) {
+                console.log(`🧠 归一化+停用词过滤后，短句被长句包含 → 判定为重复`);
+                return true;
+            }
         }
-
         // 3. 内容完全相同
         if (mem.content === newContent) {
             console.log('🧠 完全相同的记忆，跳过写入');
