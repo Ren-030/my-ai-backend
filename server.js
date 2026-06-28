@@ -290,8 +290,9 @@ const isMemoryDuplicate = async (newContent, newKeywords) => {
     '我', '你', '他', '她', '它', '我们', '你们', '他们', '她们', '它们',
     '的', '了', '在', '是', '有', '和', '与', '或', '但', '因为', '所以',
     '用户', 'AI', 'claude', '茶与', '小窝', '长期记忆', '项目',
-    '一个', '一只', '一条', '一种', '这个', '那个', '什么', '怎么', '如何'
-    ];
+    '一个', '一只', '一条', '一种', '这个', '那个', '什么', '怎么', '如何',
+    '宠物', '动物', '东西', '事情' // 新增泛化词
+     ];
 
     // 短句对长句的包含检查
     const isShortContainedInLong = (short, long) => {
@@ -305,7 +306,7 @@ const isMemoryDuplicate = async (newContent, newKeywords) => {
 
     const filteredNew = newKeywords
         .map(normalize)
-        .filter(kw => kw.length > 1 && !STOPWORDS.includes(kw));
+        .filter(kw => kw.length > 0 && !STOPWORDS.includes(kw));
         console.log('🔍 新记忆关键词（过滤后）:', filteredNew);
 
     if (!existingMemories || existingMemories.length === 0) return false;
@@ -316,11 +317,11 @@ const isMemoryDuplicate = async (newContent, newKeywords) => {
         // 第一重：归一化 + 停用词过滤
     const filteredNew = newKeywords
         .map(normalize)
-        .filter(kw => kw.length > 1 && !STOPWORDS.includes(kw));
+        .filter(kw => kw.length > 0 && !STOPWORDS.includes(kw));
 
     const filteredOld = mem.keywords
         .map(normalize)
-        .filter(kw => kw.length > 1 && !STOPWORDS.includes(kw));
+        .filter(kw => kw.length > 0 && !STOPWORDS.includes(kw));
         console.log('🔍 旧记忆关键词（过滤后）:', filteredOld);
 
          // 如果新关键词过滤后是旧关键词的子集 → 去重
@@ -351,8 +352,20 @@ const isMemoryDuplicate = async (newContent, newKeywords) => {
         // 4. 计算重叠率（用 max 做分母，更公平）
         const intersection = mem.keywords.filter(kw => newKeywords.includes(kw));
         const overlapRatio = intersection.length / Math.max(newKeywords.length, mem.keywords.length);
-
-        // 5. 高度相关则执行更新
+        
+        // 5. 检测更新信号 语言信号
+        const updateSignals = ['改为', '更喜欢', '现在是', '变成', '已经', '开始'];
+        const shouldUpdate = updateSignals.some(signal => newContent.includes(signal));
+            if (shouldUpdate) {
+        console.log(`🔄 检测到更新信号，执行更新：将「${mem.content}」更新为「${newContent}」`);
+         await supabase
+        .from('memories')
+        .update({ content: newContent, keywords: newKeywords })
+        .eq('id', mem.id);
+            return true;
+        }
+        
+        // 6. 高度相关则执行更新
         if (overlapRatio > 0.7) {
             console.log(`🔄 更新记忆：将「${mem.content}」更新为「${newContent}」`);
             await supabase
