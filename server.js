@@ -284,16 +284,6 @@ const isMemoryDuplicate = async (newContent, newKeywords) => {
     if (!newKeywords || newKeywords.length === 0) return false;
 
     // 关键词归一化（去掉“小”“大”等前缀）
-    const normalize = kw => kw.replace(/^小/, '').replace(/^大/, '').trim();
-    // 关键词停用词列表（用于去除无意义的词）
-    const STOPWORDS = [
-    '我', '你', '他', '她', '它', '我们', '你们', '他们', '她们', '它们',
-    '的', '了', '在', '是', '有', '和', '与', '或', '但', '因为', '所以',
-    '用户', 'AI', 'claude', '茶与', '小窝', '长期记忆', '项目',
-    '一个', '一只', '一条', '一种', '这个', '那个', '什么', '怎么', '如何',
-    '宠物', '动物', '东西', '事情' // 新增泛化词
-     ];
-
     const normalize = kw => {
     let word = kw.replace(/^小/, '').replace(/^大/, '').trim();
     // 同义词映射
@@ -305,6 +295,14 @@ const isMemoryDuplicate = async (newContent, newKeywords) => {
     };
         return synonymMap[word] || word;
     };
+    // 关键词停用词列表（用于去除无意义的词）
+    const STOPWORDS = [
+    '我', '你', '他', '她', '它', '我们', '你们', '他们', '她们', '它们',
+    '的', '了', '在', '是', '有', '和', '与', '或', '但', '因为', '所以',
+    '用户', 'AI', 'claude', '茶与', '小窝', '长期记忆', '项目',
+    '一个', '一只', '一条', '一种', '这个', '那个', '什么', '怎么', '如何',
+    '宠物', '动物', '东西', '事情' // 新增泛化词
+     ];
 
     // 短句对长句的包含检查
     const isShortContainedInLong = (short, long) => {
