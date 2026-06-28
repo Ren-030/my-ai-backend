@@ -283,6 +283,9 @@ if (insertError) {
 const isMemoryDuplicate = async (newContent, newKeywords) => {
     if (!newKeywords || newKeywords.length === 0) return false;
 
+    // 关键词归一化（去掉“小”“大”等前缀）
+    const normalize = kw => kw.replace(/^小/, '').replace(/^大/, '').trim();
+
     const { data: existingMemories } = await supabase
         .from('memories')
         .select('id, content, keywords');
@@ -292,25 +295,27 @@ const isMemoryDuplicate = async (newContent, newKeywords) => {
     for (const mem of existingMemories) {
         if (!mem.keywords || mem.keywords.length === 0) continue;
 
-        // 1. 优先检查：新记忆是否被已有记忆“包含”（语义重复）
-        const isFullyContained = newKeywords.every(kw => mem.keywords.includes(kw));
-        if (isFullyContained) {
-            console.log(`🧠 新记忆完全被已有记忆包含：「${mem.content}」包含「${newContent}」，跳过写入`);
+        // 1. 归一化后的包含检查（不依赖重叠率）
+        const newNormalized = newKeywords.map(normalize);
+        const oldNormalized = mem.keywords.map(normalize);
+        const isContained = newNormalized.every(kw => oldNormalized.includes(kw));
+        if (isContained) {
+            console.log(`🧠 归一化后完全包含：新关键词是旧关键词的子集 → 判定为重复`);
             return true;
         }
 
-        // 2. 计算重叠率
+        // 2. 内容完全相同
+        if (mem.content === newContent) {
+            console.log('🧠 完全相同的记忆，跳过写入');
+            return true;
+        }
+
+        // 3. 计算重叠率（用 max 做分母，更公平）
         const intersection = mem.keywords.filter(kw => newKeywords.includes(kw));
-        const overlapRatio = intersection.length / newKeywords.length;
+        const overlapRatio = intersection.length / Math.max(newKeywords.length, mem.keywords.length);
 
-        // 3. 如果重叠率大于阈值，执行更新或判定重复
+        // 4. 高度相关则执行更新
         if (overlapRatio > 0.7) {
-            if (mem.content === newContent) {
-                console.log('🧠 完全相同的记忆，跳过写入');
-                return true;
-            }
-
-            // 内容不同但高度相关 → 执行更新
             console.log(`🔄 更新记忆：将「${mem.content}」更新为「${newContent}」`);
             await supabase
                 .from('memories')
@@ -320,7 +325,7 @@ const isMemoryDuplicate = async (newContent, newKeywords) => {
         }
     }
 
-    return false; // 独立新记忆
+    return false;
 };
 
 // 记忆判断器：从对话中提取值得长期记住的信息
