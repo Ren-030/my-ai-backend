@@ -278,6 +278,13 @@ if (insertError) {
 
     console.log(`✅ 压缩完成，已删除 ${idsToDelete.length} 条消息，摘要已保存`);
 };
+// 3.3 关键词停用词列表（用于去除无意义的词）
+const STOPWORDS = [
+    '我', '你', '他', '她', '它', '我们', '你们', '他们', '她们', '它们',
+    '的', '了', '在', '是', '有', '和', '与', '或', '但', '因为', '所以',
+    '用户', 'AI', 'claude', '茶与', '小窝', '长期记忆', '项目',
+    '一个', '一只', '一条', '一种', '这个', '那个', '什么', '怎么', '如何'
+];
 
 // 检查记忆是否已存在（基于关键词重叠率）
 const isMemoryDuplicate = async (newContent, newKeywords) => {
@@ -285,6 +292,21 @@ const isMemoryDuplicate = async (newContent, newKeywords) => {
 
     // 关键词归一化（去掉“小”“大”等前缀）
     const normalize = kw => kw.replace(/^小/, '').replace(/^大/, '').trim();
+
+    // 短句对长句的包含检查
+const isShortContainedInLong = (short, long) => {
+    return short.every(kw => long.includes(kw));
+};
+
+        // 如果新关键词过滤后是旧关键词的子集 → 去重
+    if (filteredNew.length > 0 && filteredOld.length > 0) {
+    const newIsSubset = isShortContainedInLong(filteredNew, filteredOld);
+    const oldIsSubset = isShortContainedInLong(filteredOld, filteredNew);
+    if (newIsSubset || oldIsSubset) {
+        console.log(`🧠 归一化+停用词过滤后，短句被长句包含 → 去重`);
+        return true;
+    }
+}
 
     const { data: existingMemories } = await supabase
         .from('memories')
@@ -295,7 +317,16 @@ const isMemoryDuplicate = async (newContent, newKeywords) => {
     for (const mem of existingMemories) {
         if (!mem.keywords || mem.keywords.length === 0) continue;
 
-        // 1. 归一化后的包含检查（不依赖重叠率）
+        // 第一重：归一化 + 停用词过滤
+    const filteredNew = newKeywords
+    .map(normalize)
+    .filter(kw => kw.length > 1 && !STOPWORDS.includes(kw));
+
+    const filteredOld = mem.keywords
+    .map(normalize)
+    .filter(kw => kw.length > 1 && !STOPWORDS.includes(kw));
+
+        // 第二重：不依赖阈值的双向子集包含检查（替换原来的旧逻辑）
         const newNormalized = newKeywords.map(normalize);
         const oldNormalized = mem.keywords.map(normalize);
         const isContained = newNormalized.every(kw => oldNormalized.includes(kw));
@@ -304,17 +335,17 @@ const isMemoryDuplicate = async (newContent, newKeywords) => {
             return true;
         }
 
-        // 2. 内容完全相同
+        // 3. 内容完全相同
         if (mem.content === newContent) {
             console.log('🧠 完全相同的记忆，跳过写入');
             return true;
         }
 
-        // 3. 计算重叠率（用 max 做分母，更公平）
+        // 4. 计算重叠率（用 max 做分母，更公平）
         const intersection = mem.keywords.filter(kw => newKeywords.includes(kw));
         const overlapRatio = intersection.length / Math.max(newKeywords.length, mem.keywords.length);
 
-        // 4. 高度相关则执行更新
+        // 5. 高度相关则执行更新
         if (overlapRatio > 0.7) {
             console.log(`🔄 更新记忆：将「${mem.content}」更新为「${newContent}」`);
             await supabase
@@ -454,7 +485,7 @@ if (memoriesData && memoriesData.length > 0) {
         .map(m => `- ${m.content}`)
         .join('\n');
 
-console.log("🧠 MEMORIES INJECTED:", memoryText);
+console.log("🧠 MEMORIES INJECTED:", memoriesText);
     chatMessages.push({
         role: 'system',
         content: `【长期记忆】
