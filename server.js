@@ -279,20 +279,19 @@ if (insertError) {
     console.log(`✅ 压缩完成，已删除 ${idsToDelete.length} 条消息，摘要已保存`);
 };
 
-// 3.3 关键词停用词列表（用于去除无意义的词）
-const STOPWORDS = [
-    '我', '你', '他', '她', '它', '我们', '你们', '他们', '她们', '它们',
-    '的', '了', '在', '是', '有', '和', '与', '或', '但', '因为', '所以',
-    '用户', 'AI', 'claude', '茶与', '小窝', '长期记忆', '项目',
-    '一个', '一只', '一条', '一种', '这个', '那个', '什么', '怎么', '如何'
-];
-
 // 检查记忆是否已存在（基于关键词重叠率）
 const isMemoryDuplicate = async (newContent, newKeywords) => {
     if (!newKeywords || newKeywords.length === 0) return false;
 
     // 关键词归一化（去掉“小”“大”等前缀）
     const normalize = kw => kw.replace(/^小/, '').replace(/^大/, '').trim();
+    // 关键词停用词列表（用于去除无意义的词）
+    const STOPWORDS = [
+    '我', '你', '他', '她', '它', '我们', '你们', '他们', '她们', '它们',
+    '的', '了', '在', '是', '有', '和', '与', '或', '但', '因为', '所以',
+    '用户', 'AI', 'claude', '茶与', '小窝', '长期记忆', '项目',
+    '一个', '一只', '一条', '一种', '这个', '那个', '什么', '怎么', '如何'
+    ];
 
     // 短句对长句的包含检查
     const isShortContainedInLong = (short, long) => {
@@ -302,6 +301,12 @@ const isMemoryDuplicate = async (newContent, newKeywords) => {
     const { data: existingMemories } = await supabase
         .from('memories')
         .select('id, content, keywords');
+        console.log('🔍 新记忆关键词（过滤前）:', newKeywords);
+
+    const filteredNew = newKeywords
+        .map(normalize)
+        .filter(kw => kw.length > 1 && !STOPWORDS.includes(kw));
+        console.log('🔍 新记忆关键词（过滤后）:', filteredNew);
 
     if (!existingMemories || existingMemories.length === 0) return false;
 
@@ -316,6 +321,11 @@ const isMemoryDuplicate = async (newContent, newKeywords) => {
     const filteredOld = mem.keywords
         .map(normalize)
         .filter(kw => kw.length > 1 && !STOPWORDS.includes(kw));
+
+    const filteredOld = mem.keywords
+        .map(normalize)
+        .filter(kw => kw.length > 1 && !STOPWORDS.includes(kw));
+        console.log('🔍 旧记忆关键词（过滤后）:', filteredOld);
 
          // 如果新关键词过滤后是旧关键词的子集 → 去重
         if (filteredNew.length > 0 && filteredOld.length > 0) {
