@@ -282,45 +282,45 @@ if (insertError) {
 // 检查记忆是否已存在（基于关键词重叠率）
 const isMemoryDuplicate = async (newContent, newKeywords) => {
     if (!newKeywords || newKeywords.length === 0) return false;
-    // 检查新记忆是否被已有记忆“包含”
-const isSubset = (newKeywords, existingKeywords) => {
-    return newKeywords.every(kw => existingKeywords.includes(kw));
-};
-    // 从数据库读取所有已有的记忆（只取 keywords）
+
     const { data: existingMemories } = await supabase
         .from('memories')
-        .select('content, keywords');
+        .select('id, content, keywords');
+
     if (!existingMemories || existingMemories.length === 0) return false;
 
-    // 遍历已有记忆，用“双重保险”来判断
     for (const mem of existingMemories) {
         if (!mem.keywords || mem.keywords.length === 0) continue;
-        // 计算关键词重叠率（保留了夫人的成果）
+
+        // 1. 优先检查：新记忆是否被已有记忆“包含”（语义重复）
+        const isFullyContained = newKeywords.every(kw => mem.keywords.includes(kw));
+        if (isFullyContained) {
+            console.log(`🧠 新记忆完全被已有记忆包含：「${mem.content}」包含「${newContent}」，跳过写入`);
+            return true;
+        }
+
+        // 2. 计算重叠率
         const intersection = mem.keywords.filter(kw => newKeywords.includes(kw));
         const overlapRatio = intersection.length / newKeywords.length;
-        
-   if (overlapRatio > 0.7) {
-    // 检查内容是否完全相同
-    if (mem.content === newContent) {
-        console.log('🧠 完全相同的记忆，跳过写入');
-        return true;
-    }
-    // 如果内容不同，但高度相关 → 执行更新
-    console.log(`🔄 更新记忆：将「${mem.content}」更新为「${newContent}」`);
-    await supabase
-        .from('memories')
-        .update({ content: newContent, keywords: newKeywords })
-        .eq('id', mem.id);
-        return true; // 已处理，不需要再写入
-        }   
 
-        //  子集包含检查：重叠率高，并且新关键词完全被老关键词包含，才算重复
-        if (overlapRatio > 0.7&& isSubset(newKeywords, mem.keywords)) {
-            console.log(`🧠 检测到重复记忆：已有「${mem.content}」与「${newContent}」重叠率 ${overlapRatio}`);
+        // 3. 如果重叠率大于阈值，执行更新或判定重复
+        if (overlapRatio > 0.7) {
+            if (mem.content === newContent) {
+                console.log('🧠 完全相同的记忆，跳过写入');
+                return true;
+            }
+
+            // 内容不同但高度相关 → 执行更新
+            console.log(`🔄 更新记忆：将「${mem.content}」更新为「${newContent}」`);
+            await supabase
+                .from('memories')
+                .update({ content: newContent, keywords: newKeywords })
+                .eq('id', mem.id);
             return true;
         }
     }
-    return false;  // 如果都安全通过，说明是一条独立的新记忆
+
+    return false; // 独立新记忆
 };
 
 // 记忆判断器：从对话中提取值得长期记住的信息
