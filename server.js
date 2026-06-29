@@ -461,38 +461,40 @@ AI说：${aiReply}
     });
 
 // 假设你已经得到了 result
-const result = data.choices?.[0]?.message?.content?.trim() || 'NO_MEMORY';
+    const data = await response.json();
+    const result = data.choices?.[0]?.message?.content?.trim() || 'NO_MEMORY';
 
-if (result === 'NO_MEMORY') {
-    return null;
-}
+    if (result === 'NO_MEMORY') {
+        return null;
+    }
 
-let parsedResult;
-try {
-    parsedResult = JSON.parse(result);
-} catch {
-    parsedResult = { content: result, keywords: [] };
-}
+    let parsedResult;
+    try {
+        parsedResult = JSON.parse(result);
+    } catch {
+        parsedResult = { content: result, keywords: [] };
+    }
 
-// 兜底归一化
-const normalizeKeywords = (keywords) => {
-    const map = {
-        '小猫': '猫', '猫咪': '猫', '猫猫': '猫',
-        '小狗': '狗', '狗狗': '狗',
-        '小仓鼠': '仓鼠',
+    // 兜底归一化小助手
+    const normalizeKeywords = (keywords) => {
+        const map = {
+            '小猫': '猫', '猫咪': '猫', '猫猫': '猫',
+            '小狗': '狗', '狗狗': '狗',
+            '小仓鼠': '仓鼠',
+        };
+        return keywords
+            .map(kw => map[kw] || kw)
+            .filter(kw => !['用户', '喜欢', '有', '是', '现在', '之前', '一个', '东西', '宠物', '情况', '状态'].includes(kw))
+            .slice(0, 3);
     };
-    return keywords
-        .map(kw => map[kw] || kw)
-        .filter(kw => !['用户', '喜欢', '有', '是', '现在', '之前', '一个', '东西', '宠物', '情况', '状态'].includes(kw))
-        .slice(0, 3);
+
+    if (parsedResult.keywords) {
+        parsedResult.keywords = normalizeKeywords(parsedResult.keywords);
+    }
+
+    return parsedResult;
 };
 
-if (parsedResult.keywords) {
-    parsedResult.keywords = normalizeKeywords(parsedResult.keywords);
-}
-
-return parsedResult;
-};
 
 // ========================
 // 4. 核心：AI 对话接口（支持多模型）
