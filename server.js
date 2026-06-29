@@ -421,9 +421,18 @@ ${aiReply}
 【输出要求】
 - 如果值得记住，返回一个 JSON 对象，包含两个字段：
   - content：记忆内容（简洁的句子）
-  - keywords：关键词数组（2-4个，用于检索）
+  - keywords：关键词数组（2-3个，用于检索）
 - 如果不值得记住，只返回：NO_MEMORY
 
+【关键词提取规则（重要）】
+1. 只保留最能代表事实的名词或专有名词。
+2. 不要输出这些词：用户、喜欢、有、是、现在、之前、一个、东西、宠物、情况、状态。
+3. 如果存在多个表达，统一使用最基础的实体名称：
+   - 小猫、猫咪、猫猫 → 猫
+   - 小狗、狗狗 → 狗
+   - 小仓鼠 → 仓鼠
+4. 不要输出修饰词（小、很、特别、超级等）。
+5. 最多输出 3 个关键词。
 
 【输出示例】
 用户说："我叫茶与，我喜欢喝红茶。"
@@ -451,16 +460,38 @@ AI说：${aiReply}
         })
     });
 
-    const data = await response.json();
-    const result = data.choices?.[0]?.message?.content?.trim() || 'NO_MEMORY';
-    if (result === 'NO_MEMORY') return null;
-try {
-    const parsed = JSON.parse(result);
-    return parsed; // { content: "...", keywords: [...] }
-} catch {
-    // 如果返回的不是 JSON 格式，按纯文本处理
-    return { content: result, keywords: [] };
+// 假设你已经得到了 result
+const result = data.choices?.[0]?.message?.content?.trim() || 'NO_MEMORY';
+
+if (result === 'NO_MEMORY') {
+    return null;
 }
+
+let parsedResult;
+try {
+    parsedResult = JSON.parse(result);
+} catch {
+    parsedResult = { content: result, keywords: [] };
+}
+
+// 兜底归一化
+const normalizeKeywords = (keywords) => {
+    const map = {
+        '小猫': '猫', '猫咪': '猫', '猫猫': '猫',
+        '小狗': '狗', '狗狗': '狗',
+        '小仓鼠': '仓鼠',
+    };
+    return keywords
+        .map(kw => map[kw] || kw)
+        .filter(kw => !['用户', '喜欢', '有', '是', '现在', '之前', '一个', '东西', '宠物', '情况', '状态'].includes(kw))
+        .slice(0, 3);
+};
+
+if (parsedResult.keywords) {
+    parsedResult.keywords = normalizeKeywords(parsedResult.keywords);
+}
+
+return parsedResult;
 };
 
 // ========================
