@@ -720,7 +720,9 @@ chatMessages.push({ role: 'user', content: message });
 // --- 新增：尝试提取长期记忆（含去重检查） ---
         try {
             const memory = await extractMemories(message, reply);
+                console.log('🔍 进入记忆写入流程，memory 值:', memory);
             if (memory) {
+                console.log('🔍 memory 存在，进入去重检查...');
                 // 去重检查：判断是否已存在相似记忆
                 const isDuplicate = await isMemoryDuplicate(memory.content, memory.keywords);
                 if (!isDuplicate) {
@@ -731,6 +733,8 @@ chatMessages.push({ role: 'user', content: message });
                 } else {
                     console.log('🧠 重复记忆，已跳过写入');
                 }
+            } else {
+                console.log('🔍 memory 为空，跳过写入');
             }
         } catch (error) {
             console.error('❌ 记忆提取失败:', error.message);
