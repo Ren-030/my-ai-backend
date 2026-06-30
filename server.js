@@ -637,14 +637,29 @@ const { data: recentMessages } = await supabase
     .order('created_at', { ascending: true })
     .limit(10);
 
+// ====== 向量检索：从记忆库中找回相关记忆 ======
+const userEmbedding = await getEmbedding(message);
+let relevantMemoryText = '';
+
+if (userEmbedding) {
+    const { data: memories } = await supabase
+        .rpc('match_memories', {
+            query_embedding: userEmbedding,
+            match_threshold: 0.7,
+            match_count: 5
+        });
+
+    if (memories && memories.length > 0) {
+        relevantMemoryText = memories
+            .map(m => `- ${m.content}`)
+            .join('\n');
+        console.log(`🧠 向量检索命中 ${memories.length} 条记忆`);
+    } else {
+        console.log('🧠 向量检索未命中相关记忆');
+    }
+}
+
 // 4. 组装上下文
-// 注意：我们不再需要 `historyData` 了，直接用 summary + recentMessages 构造 messages 数组
-// 但 messages 数组的构造会在原有代码中靠后的位置进行，所以这里只负责获取数据。
-// 不过为了减少混淆，我们可以把原有的 messages 构造逻辑也一并替换。
-
-// 实际上，你原本代码里在调用 AI API 时，会使用一个 `messages` 变量。
-// 我们现在就用新的数据来构造它。
-
 if (summary) {
     chatMessages.push({
         role: 'system',
@@ -660,55 +675,62 @@ ${summary}
 `
     });
 }
-// 关键词检索：取出相关的长期记忆，push 到 chatMessages 里
-// 1. 从用户消息中提取关键词（简单分词 + 过滤短词）
-//  把用户发来的这条 message，翻译成数字向量
-const userEmbedding = await getEmbedding(message); // 💡 注意：你这里的参数变量名是 message 哟！
 
-// 调用 Supabase 的向量搜索过程，直接精准打捞最相关的 5 条记忆
+// 💡 删除了重复的 userEmbedding 声明，直接使用前面已经获取到的数据进行处理
 const { data: matchedData, error: rpcError } = await supabase
     .rpc('match_memories', {
-        query_embedding: userEmbedding,
-        match_threshold: 0.7, // 相似度阈值
-        match_count: 5        // 捞出最相关的 5 条
+        query_embedding: userEmbedding, // 直接复用上面的 userEmbedding
+        match_threshold: 0.7, 
+        match_count: 5        
     });
 
 if (rpcError) console.error('❌ 向量检索出错啦:', rpcError);
 
-//  重新定义一个叫 relevantMemories 的数组，把捞出来的记忆塞进去，无缝对接后面的 AI 回复逻辑
+//  直接使用数据库帮你找出来的最相关的记忆，不再进行二次过滤，既安全又高效
 let relevantMemories = matchedData || [];
-
-if (matchedData && matchedData.length > 0) {
-    relevantMemories = matchedData.filter(m => {
-        if (!Array.isArray(m.keywords) || m.keywords.length === 0) {
-        return false;
-        }
-
-        return m.keywords.some(kw =>
-            userWords.some(word =>
-                word.includes(kw) || kw.includes(word)
-            )
-        );
-    });
-
-    if (relevantMemories.length > 0) {
+if (relevantMemories.length > 0) {
     const memoryText = relevantMemories
         .map(m => `- ${m.content}`)
         .join('\n');
-
     console.log(`🧠 注入了 ${relevantMemories.length} 条相关记忆`);
     console.log('🧠 命中的记忆内容:', JSON.stringify(relevantMemories));
 
     chatMessages.push({
         role: 'system',
-        content: `【与当前话题相关的记忆】
-
-        ${memoryText}
-
-        请在回答用户问题时优先使用这些事实，不要猜测。`
-             });
-        }
+        content: `【与当前话题相关的记忆】\n\n${memoryText}\n\n请在回答用户问题时优先使用这些事实，不要猜测。`
+    });
 }
+
+    if (relevantMemories.length > 0) {
+        const memoryText = relevantMemories
+            .map(m => `- ${m.content}`)
+            .join('\n');
+        console.log(`🧠 注入了 ${relevantMemories.length} 条相关记忆`);
+        console.log('🧠 命中的记忆内容:', JSON.stringify(relevantMemories));
+
+        chatMessages.push({
+            role: 'system',
+            content: `【与当前话题相关的记忆】\n\n${memoryText}\n\n请在回答用户问题时优先使用这些事实，不要猜测。`
+        });
+    }
+
+// 💡 删除了重复声明 chatMessages 的代码，直接将向量检索到的内容注入到已有的数组中
+if (relevantMemoryText) {
+    chatMessages.push({
+        role: 'system',
+        content: `【与当前话题相关的记忆】\n${relevantMemoryText}\n只参考这些信息，不要主动提起“记忆”这个词。`
+    });
+}
+
+//  注入向量检索到的记忆
+if (relevantMemoryText) {
+    chatMessages.push({
+        role: 'system',
+        content: `【与当前话题相关的记忆】\n${relevantMemoryText}\n只参考这些信息，不要主动提起“记忆”这个词。`
+    });
+}
+
+// 然后继续添加 recentMessages 和当前用户消息
 
 // 添加近期消息（注意转换 role）
 (recentMessages || []).forEach(msg => {
