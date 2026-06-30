@@ -645,7 +645,7 @@ if (userEmbedding) {
     const { data: memories } = await supabase
         .rpc('match_memories', {
             query_embedding: userEmbedding,
-            match_threshold: 0.5,
+            match_threshold: 0.4,
             match_count: 10
         });
 
@@ -676,16 +676,16 @@ ${summary}
     });
 }
 
-// 💡 删除了重复的 userEmbedding 声明，直接使用前面已经获取到的数据进行处理
+// 向量检索拿到结果，删除了重复的 userEmbedding 声明
 const { data: matchedData, error: rpcError } = await supabase
     .rpc('match_memories', {
         query_embedding: userEmbedding, // 直接复用上面的 userEmbedding
-        match_threshold: 0.5, 
+        match_threshold: 0.4, 
         match_count: 10        
     });
 
 if (rpcError) console.error('❌ 向量检索出错啦:', rpcError);
-      console.log('🧠 检索返回的全部结果:', matchedData);
+    console.log('🧠 检索返回的全部结果:', matchedData);
 
 //  直接使用数据库帮你找出来的最相关的记忆，不再进行二次过滤，既安全又高效
 let relevantMemories = matchedData || [];
@@ -891,34 +891,4 @@ app.get('/memories', async (req, res) => {
 // ========================
 app.listen(PORT, () => {
     console.log(`✅ 服务已启动，端口: ${PORT}`);
-  app.listen(PORT, async () => {
-    console.log(`✅ 服务已启动，端口: ${PORT}`);
-
-    // ✨ 帮以前遗留的旧记忆安全地修补向量数据
-    try {
-        const { data: memories } = await supabase
-            .from('memories')
-            .select('id, content')
-            .is('embedding', null);
-
-        if (memories && memories.length > 0) {
-            console.log(`🔍 发现有 ${memories.length} 条旧记忆缺少向量，开始自动修补...`);
-            for (const mem of memories) {
-                const embedding = await getEmbedding(mem.content);
-                if (embedding) {
-                    await supabase
-                        .from('memories')
-                        .update({ embedding })
-                        .eq('id', mem.id);
-                    console.log(`✅ 已补向量: ${mem.content}`);
-                }
-            }
-            console.log('🎉 所有旧记忆的向量修补完成！');
-        } else {
-            console.log('🧠 没有发现缺少向量的旧记忆，记忆库很健康。');
-        }
-    } catch (error) {
-        console.error('❌ 自动修补旧记忆向量时失败了:', error.message);
-    }
-});
 });
