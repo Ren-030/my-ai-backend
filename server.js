@@ -29,8 +29,20 @@ const getEmbedding = async (text) => {
                 input: text
             })
         });
+
+        if (!response.ok) {
+            console.error('❌ Embedding API 请求失败:', response.status);
+            return null;
+        }
+
         const data = await response.json();
-        return data.data[0].embedding;
+        // 检查返回数据结构
+        if (data && data.data && data.data.length > 0 && data.data[0].embedding) {
+            return data.data[0].embedding;
+        } else {
+            console.error('❌ Embedding API 返回数据格式异常:', JSON.stringify(data).slice(0, 200));
+            return null;
+        }
     } catch (error) {
         console.error('❌ 生成向量失败:', error.message);
         return null;
@@ -666,9 +678,8 @@ if (rpcError) console.error('❌ 向量检索出错啦:', rpcError);
 //  重新定义一个叫 relevantMemories 的数组，把捞出来的记忆塞进去，无缝对接后面的 AI 回复逻辑
 let relevantMemories = matchedData || [];
 
-if (allMemories && allMemories.length > 0) {
-    relevantMemories = allMemories.filter(m => {
-
+if (matchedData && matchedData.length > 0) {
+    relevantMemories = matchedData.filter(m => {
         if (!Array.isArray(m.keywords) || m.keywords.length === 0) {
         return false;
         }
@@ -788,23 +799,18 @@ chatMessages.push({ role: 'user', content: message });
                     // 在写入记忆之前，生成向量
                 const embedding = await getEmbedding(memory.content);
                 if (embedding) {
-                await supabase
-                    .from('memories')
-                    .insert([{
-                           content: memory.content,
-                           keywords: memory.keywords,
-                           embedding: embedding
-                    }]);
-                   console.log('🧠 新记忆已写入（含向量）:', memory.content);
-           } else {
-                // 如果向量生成失败，回退到只存 content 和 keywords
-                await supabase
-                    .from('memories')
-                    .insert([{
-                           content: memory.content,
-                           keywords: memory.keywords
-                   }]);
-                   console.log('🧠 新记忆已写入（无向量）:', memory.content);
+                // 存向量
+                await supabase.from('memories').insert([{
+                    content: memory.content,
+                    keywords: memory.keywords,
+                    embedding: embedding
+                }]);
+            } else {
+                // 回退：只存 content 和 keywords
+                await supabase.from('memories').insert([{
+                    content: memory.content,
+                    keywords: memory.keywords
+                }]);
             }
                 } else {
                     console.log('🧠 重复记忆，已跳过写入');
