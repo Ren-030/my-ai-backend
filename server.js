@@ -685,6 +685,7 @@ const { data: matchedData, error: rpcError } = await supabase
     });
 
 if (rpcError) console.error('❌ 向量检索出错啦:', rpcError);
+      console.log('🧠 检索返回的全部结果:', matchedData);
 
 //  直接使用数据库帮你找出来的最相关的记忆，不再进行二次过滤，既安全又高效
 let relevantMemories = matchedData || [];
