@@ -645,8 +645,8 @@ if (userEmbedding) {
     const { data: memories } = await supabase
         .rpc('match_memories', {
             query_embedding: userEmbedding,
-            match_threshold: 0.7,
-            match_count: 5
+            match_threshold: 0.5,
+            match_count: 10
         });
 
     if (memories && memories.length > 0) {
@@ -680,8 +680,8 @@ ${summary}
 const { data: matchedData, error: rpcError } = await supabase
     .rpc('match_memories', {
         query_embedding: userEmbedding, // 直接复用上面的 userEmbedding
-        match_threshold: 0.7, 
-        match_count: 5        
+        match_threshold: 0.5, 
+        match_count: 10        
     });
 
 if (rpcError) console.error('❌ 向量检索出错啦:', rpcError);
