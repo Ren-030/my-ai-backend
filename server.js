@@ -15,6 +15,28 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 );
 
+// ====== Embedding 工具函数 ======
+const getEmbedding = async (text) => {
+    try {
+        const response = await fetch('https://api.siliconflow.cn/v1/embeddings', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${process.env.SILICONFLOW_API_KEY}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                model: 'BAAI/bge-large-zh-v1.5',
+                input: text
+            })
+        });
+        const data = await response.json();
+        return data.data[0].embedding;
+    } catch (error) {
+        console.error('❌ 生成向量失败:', error.message);
+        return null;
+    }
+};
+
 // ========================
 // 1. 健康检查接口
 // ========================
@@ -238,14 +260,14 @@ const compressSession = async (sessionId) => {
     console.log(`📝 正在压缩 ${oldMessages.length} 条消息...`);
     const { summary, tag } = await generateSummary(oldMessages);
     // 生成摘要后，获取当前压缩次数
-const { data: countData } = await supabase
+    const { data: countData } = await supabase
     .from('summaries')
     .select('compression_count')
     .eq('session_id', sessionId)
     .order('compression_count', { ascending: false })
     .limit(1);
 
-const nextCount = countData?.[0]?.compression_count !== undefined 
+    const nextCount = countData?.[0]?.compression_count !== undefined 
     ? countData[0].compression_count + 1 
     : 1;
 
@@ -628,18 +650,21 @@ ${summary}
 }
 // 关键词检索：取出相关的长期记忆，push 到 chatMessages 里
 // 1. 从用户消息中提取关键词（简单分词 + 过滤短词）
-//    从数据库读取所有记忆（含 keywords）
-const { data: allMemories } = await supabase
-    .from('memories')
-    .select('content, keywords');
+//  把用户发来的这条 message，翻译成数字向量
+const userEmbedding = await getEmbedding(message); // 💡 注意：你这里的参数变量名是 message 哟！
 
-const userWords = message
-  .toLowerCase()
-  .replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, " ")
-  .split(" ")
-  .filter(Boolean);
+// 调用 Supabase 的向量搜索过程，直接精准打捞最相关的 5 条记忆
+const { data: matchedData, error: rpcError } = await supabase
+    .rpc('match_memories', {
+        query_embedding: userEmbedding,
+        match_threshold: 0.7, // 相似度阈值
+        match_count: 5        // 捞出最相关的 5 条
+    });
 
-let relevantMemories = [];
+if (rpcError) console.error('❌ 向量检索出错啦:', rpcError);
+
+//  重新定义一个叫 relevantMemories 的数组，把捞出来的记忆塞进去，无缝对接后面的 AI 回复逻辑
+let relevantMemories = matchedData || [];
 
 if (allMemories && allMemories.length > 0) {
     relevantMemories = allMemories.filter(m => {
@@ -760,10 +785,27 @@ chatMessages.push({ role: 'user', content: message });
                 // 去重检查：判断是否已存在相似记忆
                 const isDuplicate = await isMemoryDuplicate(memory.content, memory.keywords);
                 if (!isDuplicate) {
-                    await supabase
-                        .from('memories')
-                        .insert([{ content: memory.content, keywords: memory.keywords }]);
-                    console.log('🧠 新记忆已写入:', memory.content);
+                    // 在写入记忆之前，生成向量
+                const embedding = await getEmbedding(memory.content);
+                if (embedding) {
+                await supabase
+                    .from('memories')
+                    .insert([{
+                           content: memory.content,
+                           keywords: memory.keywords,
+                           embedding: embedding
+                    }]);
+                   console.log('🧠 新记忆已写入（含向量）:', memory.content);
+           } else {
+                // 如果向量生成失败，回退到只存 content 和 keywords
+                await supabase
+                    .from('memories')
+                    .insert([{
+                           content: memory.content,
+                           keywords: memory.keywords
+                   }]);
+                   console.log('🧠 新记忆已写入（无向量）:', memory.content);
+            }
                 } else {
                     console.log('🧠 重复记忆，已跳过写入');
                 }
