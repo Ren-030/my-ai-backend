@@ -461,7 +461,7 @@ ${aiReply}
 - 用户的重要计划
 - 用户的重要关系信息
 - 用户长期拥有的作品、项目
-- 用户提到自己拥有的、关心的、日常相关的人或物（宠物、家人、爱好、习惯），请提取为长期记忆。
+- 用户提到自己拥有的、关心的、日常相关的人或物（宠物、家人、爱好、饮食或饮品偏好、习惯），请提取为长期记忆。
 
 不要提取：
 
@@ -694,15 +694,33 @@ ${summary}
     });
 }
 
-// 向量检索拿到结果，删除了重复的 userEmbedding 声明
+// ✅ 向量检索：只保留一份干净的打捞和过滤逻辑
 const { data: matchedData, error: rpcError } = await supabase
     .rpc('match_memories', {
-        query_embedding: userEmbedding, // 直接复用上面的 userEmbedding
+        query_embedding: userEmbedding, 
         match_threshold: 0.4, 
         match_count: 10        
     });
 
 if (rpcError) console.error('❌ 向量检索出错啦:', rpcError);
+
+// 贴上你的高质过滤器：在代码里严格把关，只留下相似度 > 0.5 的优质记忆
+if (matchedData && matchedData.length > 0) {
+    // 过滤掉相似度低于 0.5 的结果
+    const filtered = matchedData.filter(item => item.similarity > 0.5);
+
+    if (filtered.length > 0) {
+        // 用 filtered 来构建 memoryText
+        const memoryText = filtered.map(m => `- ${m.content}`).join('\n');
+        chatMessages.push({
+            role: 'system',
+            content: `【与当前话题相关的记忆】\n${memoryText}\n只参考这些信息，不要主动提起“记忆”这个词。`
+        });
+        console.log(`🧠 注入了 ${filtered.length} 条相关记忆（相似度 > 0.5）`);
+    } else {
+        console.log('🧠 检索到记忆但相似度均低于 0.5，不注入');
+    }
+}
     console.log('🧠 检索返回的全部结果:', matchedData);
 
 //  直接使用数据库帮你找出来的最相关的记忆，不再进行二次过滤，既安全又高效
@@ -732,14 +750,6 @@ if (relevantMemories.length > 0) {
             content: `【与当前话题相关的记忆】\n\n${memoryText}\n\n请在回答用户问题时优先使用这些事实，不要猜测。`
         });
     }
-
-// 💡 删除了重复声明 chatMessages 的代码，直接将向量检索到的内容注入到已有的数组中
-if (relevantMemoryText) {
-    chatMessages.push({
-        role: 'system',
-        content: `【与当前话题相关的记忆】\n${relevantMemoryText}\n只参考这些信息，不要主动提起“记忆”这个词。`
-    });
-}
 
 //  注入向量检索到的记忆
 if (relevantMemoryText) {
