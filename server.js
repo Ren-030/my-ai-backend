@@ -397,29 +397,47 @@ const isMemoryDuplicate = async (newContent, newKeywords) => {
         const intersection = mem.keywords.filter(kw => newKeywords.includes(kw));
         const overlapRatio = intersection.length / Math.max(newKeywords.length, mem.keywords.length);
         
-        // 5. 检测更新信号 语言信号
+        // ✅ 5. 全新检测更新信号逻辑
         const updateSignals = ['改为', '更喜欢', '现在是', '变成', '已经', '开始'];
         const shouldUpdate = updateSignals.some(signal => newContent.includes(signal));
-            if (shouldUpdate) {
-        console.log(`🔄 检测到更新信号，执行更新：将「${mem.content}」更新为「${newContent}」`);
-         await supabase
-        .from('memories')
-        .update({ content: newContent, keywords: newKeywords })
-        .eq('id', mem.id);
-            return true;
-        }
-        
-        // 6. 高度相关则执行更新
-        if (overlapRatio > 0.7) {
-            console.log(`🔄 更新记忆：将「${mem.content}」更新为「${newContent}」`);
-            await supabase
-                .from('memories')
-                .update({ content: newContent, keywords: newKeywords })
-                .eq('id', mem.id);
-            return true;
+            //  如果触发了更新信号，或者是关键词重合度特别高（大于 0.7）
+        if (shouldUpdate || overlapRatio > 0.7) {
+            console.log(`🔍 触发了更新机制，开始寻找最相似的旧记忆...`);
+            // 1. 先用 embedding 找最相似的记忆
+            const newEmbedding = await getEmbedding(newContent);
+            if (newEmbedding) {
+                const { data: similarMemories } = await supabase
+                    .rpc('match_memories', {
+                        query_embedding: newEmbedding,
+                        match_threshold: 0.6,   // 高于这个阈值才认为“足够相似”
+                        match_count: 1         // 只取最相似的那一条  
+                    });
+
+                if (similarMemories && similarMemories.length > 0) {
+                    const target = similarMemories[0];
+                    console.log(`🔄 成功找到最匹配的旧记忆！id=${target.id}, 原内容是: "${target.content}"`);
+            // 2. 更新这条记忆
+                    await supabase
+                        .from('memories')
+                        .update({ 
+                            content: newContent, 
+                            keywords: newKeywords,
+                            embedding: newEmbedding 
+                        })
+                        .eq('id', target.id);
+                        
+                    console.log(`🔄 更新成功啦：已把旧记忆替换为新记忆「${newContent}」`);
+                    return true; 
+                } else {
+                    console.log('🔄 没发现足够相似的旧记忆，跳过更新');
+                    return false; 
+                }
+            } else {
+                console.log('🔄 无法生成 embedding，跳过更新');
+                return false;
+            }
         }
     }
-
     return false;
 };
 
