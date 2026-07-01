@@ -548,7 +548,6 @@ AI说：${aiReply}
     return parsedResult;
 };
 
-
 // ========================
 // 4. 核心：AI 对话接口（支持多模型）
 // ========================
@@ -560,128 +559,62 @@ app.post('/chat', async (req, res) => {
     }
 
     try {
-        // --- 1. 获取设置（优先使用前端传来的，否则从数据库读取） ---
-let systemPrompt, temperature, maxTokens;
-if (req.body.system_prompt && req.body.temperature !== undefined) {
-    // 前端传了设置，直接使用
-    systemPrompt = req.body.system_prompt;
-    temperature = req.body.temperature;
-    maxTokens = req.body.max_tokens || 2048;
-} else {
-    // 前端没传，从数据库读取
-    const { data: settingsData } = await supabase
-        .from('settings')
-        .select('system_prompt, temperature, max_tokens')
-        .order('id', { ascending: true })
-        .limit(1);
-    const settings = settingsData?.[0] || {
-        system_prompt: '你是一个温暖的、善解人意的助手。',
-        temperature: 0.7,
-        max_tokens: 2048
-    };
-    systemPrompt = settings.system_prompt;
-    temperature = settings.temperature;
-    maxTokens = settings.max_tokens;
-}
+        // ---------- 1. 获取设置（优先前端传参，否则读数据库） ----------
+        let systemPrompt, temperature, maxTokens;
+        if (req.body.system_prompt && req.body.temperature !== undefined) {
+            // 前端传了设置，直接使用
+            systemPrompt = req.body.system_prompt;
+            temperature = req.body.temperature;
+            maxTokens = req.body.max_tokens || 2048;
+        } else {
+            // 前端没传，从数据库读取
+            const { data: settingsData } = await supabase
+                .from('settings')
+                .select('system_prompt, temperature, max_tokens')
+                .order('id', { ascending: true })
+                .limit(1);
+            const settings = settingsData?.[0] || {
+                system_prompt: '你是一个温暖的、善解人意的助手。',
+                temperature: 0.7,
+                max_tokens: 2048
+            };
+            systemPrompt = settings.system_prompt;
+            temperature = settings.temperature;
+            maxTokens = settings.max_tokens;
+        }
 
-// --- 在 systemPrompt 之后，摘要之前插入 ---
-//  先定义 chatMessages
-const chatMessages = [
-    { role: 'system', content: systemPrompt },
-];
+        // ---------- 2. 初始化消息数组，放入 system 设定 ----------
+        const chatMessages = [
+            { role: 'system', content: systemPrompt }
+        ];
 
-// 再获取所有长期记忆
-//旧版全量长期记忆注入,6月25日停用，原因：与关键词检索版冲突，导致每轮注入全部记忆
-/*const { data: memoriesData } = await supabase
-    .from('memories')
-    .select('content');
+        // ---------- 3. 上下文压缩（消息数 > 50 触发） ----------
+        const { count, error: countError } = await supabase
+            .from('messages')
+            .select('*', { count: 'exact', head: true })
+            .eq('session_id', sessionId);
 
-if (memoriesData && memoriesData.length > 0) {
-    const memoriesText = memoriesData
-        .map(m => `- ${m.content}`)
-        .join('\n');
+        if (countError) {
+            console.error('❌ 获取消息计数失败:', countError);
+        } else if (count > 50) {
+            console.log(`📊 当前消息数 ${count}，超过 50 条，触发压缩...`);
+            await compressSession(sessionId);
+        }
 
-console.log("🧠 MEMORIES INJECTED:", memoriesText);
-    chatMessages.push({
-        role: 'system',
-        content: `【长期记忆】
+        // ---------- 4. 获取历史摘要（最新一条） ----------
+        const { data: summaryData } = await supabase
+            .from('summaries')
+            .select('summary')
+            .eq('session_id', sessionId)
+            .order('created_at', { ascending: false })
+            .limit(1);
 
-以下是用户的一些背景信息：
+        const summary = summaryData?.[0]?.summary || '';
 
-${memoriesText}
-
-这些信息仅在相关时参考。
-
-不要主动重复所有记忆。
-
-不要为了提及记忆而提及记忆。
-
-优先回应用户当前的话题和最新消息。
-
-只有在自然相关时，才引用这些信息。`
-    });
-}*/
-
-    // --- 1.5 上下文压缩与近期消息拉取 ---
-
-// 1. 检查当前会话的消息总数，判断是否需要压缩
-const { count, error: countError } = await supabase
-    .from('messages')
-    .select('*', { count: 'exact', head: true })
-    .eq('session_id', sessionId);
-
-if (countError) {
-    console.error('❌ 获取消息计数失败:', countError);
-} else if (count > 50) {
-    console.log(`📊 当前消息数 ${count}，超过 50 条，触发压缩...`);
-    await compressSession(sessionId);
-}
-
-// 2. 拉取最新的摘要（如果有）
-const { data: summaryData } = await supabase
-    .from('summaries')
-    .select('summary')
-    .eq('session_id', sessionId)
-    .order('created_at', { ascending: false })
-    .limit(1);
-
-const summary = summaryData?.[0]?.summary || '';
-
-// 3. 拉取近期消息（只拉最近 10 条，因为更早的已被压缩或即将被压缩）
-const { data: recentMessages } = await supabase
-    .from('messages')
-    .select('role, content')
-    .eq('session_id', sessionId)
-    .order('created_at', { ascending: true })
-    .limit(10);
-
-// ====== 向量检索：从记忆库中找回相关记忆 ======
-const userEmbedding = await getEmbedding(message);
-let relevantMemoryText = '';
-
-if (userEmbedding) {
-    const { data: memories } = await supabase
-        .rpc('match_memories', {
-            query_embedding: userEmbedding,
-            match_threshold: 0.4,
-            match_count: 10
-        });
-
-    if (memories && memories.length > 0) {
-        relevantMemoryText = memories
-            .map(m => `- ${m.content}`)
-            .join('\n');
-        console.log(`🧠 向量检索命中 ${memories.length} 条记忆`);
-    } else {
-        console.log('🧠 向量检索未命中相关记忆');
-    }
-}
-
-// 4. 组装上下文
-if (summary) {
-    chatMessages.push({
-        role: 'system',
-        content: `
+        if (summary) {
+            chatMessages.push({
+                role: 'system',
+                content: `
 【历史背景与之前的重要信息】
 
 ${summary}
@@ -691,88 +624,115 @@ ${summary}
 2. 如果历史摘要与用户最近消息冲突，请优先相信用户最近消息。
 3. 时间、天气、日期、当前状态等信息，请以最新对话内容为准。
 `
-    });
-}
+            });
+            console.log('📜 历史摘要已注入');
+        }
 
-// ✅ 向量检索：只保留一份干净的打捞和过滤逻辑
-const { data: matchedData, error: rpcError } = await supabase
-    .rpc('match_memories', {
-        query_embedding: userEmbedding, 
-        match_threshold: 0.4, 
-        match_count: 10        
-    });
+        // ---------- 5. 混合检索（Embedding + 关键词补充） ----------
+        // 5.1 获取当前消息的向量
+        const userEmbedding = await getEmbedding(message);
+        let memories = [];   // 最终用于注入的记忆列表，每项 { content, similarity }
 
-if (rpcError) console.error('❌ 向量检索出错啦:', rpcError);
+        if (userEmbedding) {
+            // 5.2 Embedding 检索
+            const { data: matchedData, error: rpcError } = await supabase
+                .rpc('match_memories', {
+                    query_embedding: userEmbedding,
+                    match_threshold: 0.4,
+                    match_count: 5        // 最多返回 5 条
+                });
 
-// 贴上你的高质过滤器：在代码里严格把关，只留下相似度 > 0.5 的优质记忆
-if (matchedData && matchedData.length > 0) {
-    // 过滤掉相似度低于 0.5 的结果
-    const filtered = matchedData.filter(item => item.similarity > 0.5);
+            if (rpcError) {
+                console.error('❌ 向量检索出错:', rpcError);
+            } else {
+                console.log(`🧠 向量检索原始结果 ${matchedData?.length || 0} 条`);
 
-    if (filtered.length > 0) {
-        // 用 filtered 来构建 memoryText
-        const memoryText = filtered.map(m => `- ${m.content}`).join('\n');
-        chatMessages.push({
-            role: 'system',
-            content: `【与当前话题相关的记忆】\n${memoryText}\n只参考这些信息，不要主动提起“记忆”这个词。`
+                // 过滤出高相似度记忆（>0.5）
+                const highQuality = (matchedData || []).filter(item => item.similarity > 0.5);
+                memories = highQuality.map(item => ({
+                    content: item.content,
+                    similarity: item.similarity
+                }));
+
+                console.log(`🧠 过滤后（>0.5）得到 ${memories.length} 条高质量记忆`);
+            }
+
+            // 5.3 如果高质量记忆少于 3 条，用关键词检索补充
+            if (memories.length < 3) {
+                console.log(`🔍 高质量记忆不足 3 条（当前 ${memories.length}），开始关键词检索补充...`);
+
+                // 分词（保留长度 > 1 的词）
+                const userWords = message.split(/[\s,，。！？、；：""''（）\n]+/).filter(w => w.length > 1);
+                if (userWords.length > 0) {
+                    const { data: keywordMatches, error: kwError } = await supabase
+                        .from('memories')
+                        .select('content, keywords')
+                        .overlaps('keywords', userWords);
+
+                    if (kwError) {
+                        console.error('❌ 关键词检索出错:', kwError);
+                    } else if (keywordMatches && keywordMatches.length > 0) {
+                        console.log(`🔍 关键词检索命中 ${keywordMatches.length} 条`);
+
+                        // 合并去重（用 content 去重）
+                        const existingContents = new Set(memories.map(m => m.content));
+                        keywordMatches.forEach(k => {
+                            if (!existingContents.has(k.content)) {
+                                memories.push({
+                                    content: k.content,
+                                    similarity: 0   // 关键词匹配无相似度，设为 0
+                                });
+                                existingContents.add(k.content);
+                            }
+                        });
+                        console.log(`🔍 补充后记忆总数 ${memories.length}`);
+                    } else {
+                        console.log('🔍 关键词检索无命中');
+                    }
+                } else {
+                    console.log('🔍 用户消息分词后无有效词，跳过关键词检索');
+                }
+            }
+        } else {
+            console.log('⚠️ 无法生成用户消息向量，跳过 Embedding 检索');
+        }
+
+        // 5.4 将最终记忆注入到 chatMessages（如果有）
+        if (memories.length > 0) {
+            const memoryText = memories
+                .map(m => `- ${m.content}`)
+                .join('\n');
+            chatMessages.push({
+                role: 'system',
+                content: `【与当前话题相关的记忆】\n${memoryText}\n只参考这些信息。除非用户明确问及，否则不要在回复中主动罗列这些记忆。`
+            });
+            console.log(`🧠 最终注入 ${memories.length} 条记忆到上下文`);
+            console.log('🧠 命中的记忆内容:', JSON.stringify(memories.map(m => m.content)));
+        } else {
+            console.log('🧠 未检索到任何相关记忆，跳过注入');
+        }
+
+        // ---------- 6. 获取最近 10 条消息（用于上下文延续） ----------
+        const { data: recentMessages } = await supabase
+            .from('messages')
+            .select('role, content')
+            .eq('session_id', sessionId)
+            .order('created_at', { ascending: true })
+            .limit(10);
+
+        // 添加近期消息（注意转换 role）
+        (recentMessages || []).forEach(msg => {
+            chatMessages.push({
+                role: msg.role === 'ai' ? 'assistant' : msg.role,
+                content: msg.content
+            });
         });
-        console.log(`🧠 注入了 ${filtered.length} 条相关记忆（相似度 > 0.5）`);
-    } else {
-        console.log('🧠 检索到记忆但相似度均低于 0.5，不注入');
-    }
-}
-    console.log('🧠 检索返回的全部结果:', matchedData);
+        console.log(`📝 已加载最近 ${recentMessages?.length || 0} 条对话`);
 
-//  直接使用数据库帮你找出来的最相关的记忆，不再进行二次过滤，既安全又高效
-let relevantMemories = matchedData || [];
-if (relevantMemories.length > 0) {
-    const memoryText = relevantMemories
-        .map(m => `- ${m.content}`)
-        .join('\n');
-    console.log(`🧠 注入了 ${relevantMemories.length} 条相关记忆`);
-    console.log('🧠 命中的记忆内容:', JSON.stringify(relevantMemories));
+        // 添加当前用户消息
+        chatMessages.push({ role: 'user', content: message });
 
-    chatMessages.push({
-        role: 'system',
-        content: `【与当前话题相关的记忆】\n\n${memoryText}\n\n请在回答用户问题时优先使用这些事实，不要猜测。`
-    });
-}
-
-    if (relevantMemories.length > 0) {
-        const memoryText = relevantMemories
-            .map(m => `- ${m.content}`)
-            .join('\n');
-        console.log(`🧠 注入了 ${relevantMemories.length} 条相关记忆`);
-        console.log('🧠 命中的记忆内容:', JSON.stringify(relevantMemories));
-
-        chatMessages.push({
-            role: 'system',
-            content: `【与当前话题相关的记忆】\n\n${memoryText}\n\n请在回答用户问题时优先使用这些事实，不要猜测。`
-        });
-    }
-
-//  注入向量检索到的记忆
-if (relevantMemoryText) {
-    chatMessages.push({
-        role: 'system',
-        content: `【与当前话题相关的记忆】\n${relevantMemoryText}\n只参考这些信息，不要主动提起“记忆”这个词。`
-    });
-}
-
-// 然后继续添加 recentMessages 和当前用户消息
-
-// 添加近期消息（注意转换 role）
-(recentMessages || []).forEach(msg => {
-    chatMessages.push({
-        role: msg.role === 'ai' ? 'assistant' : msg.role,
-        content: msg.content
-    });
-});
-
-// 添加当前用户消息
-chatMessages.push({ role: 'user', content: message });
-
-        // --- 2. 保存用户消息到 Supabase ---
+        // ---------- 7. 保存用户消息到数据库 ----------
         const { error: userError } = await supabase
             .from('messages')
             .insert([{ role: 'user', content: message, session_id: sessionId }]);
@@ -782,7 +742,7 @@ chatMessages.push({ role: 'user', content: message });
             console.log('✅ 用户消息已存入 Supabase');
         }
 
-        // --- 3. 根据模型选择 API 地址和 Key ---
+        // ---------- 8. 调用 AI API（支持多模型） ----------
         let apiUrl, apiKey, modelName;
         if (model === 'claude') {
             apiUrl = 'https://yunwu.ai/v1/chat/completions';
@@ -803,7 +763,6 @@ chatMessages.push({ role: 'user', content: message });
             return res.status(500).json({ error: `模型 ${model} 的 API Key 未配置` });
         }
 
-        // --- 4. 调用 AI API（使用从数据库读取的 settings） ---
         const response = await fetch(apiUrl, {
             method: 'POST',
             headers: {
@@ -812,7 +771,7 @@ chatMessages.push({ role: 'user', content: message });
             },
             body: JSON.stringify({
                 model: modelName,
-                messages: chatMessages,  // 直接使用我们构造好的数组
+                messages: chatMessages,
                 stream: false,
                 temperature: temperature,
                 max_tokens: maxTokens
@@ -828,7 +787,7 @@ chatMessages.push({ role: 'user', content: message });
         const data = await response.json();
         const reply = data.choices?.[0]?.message?.content || data.result || '抱歉，我没有理解。';
 
-        // --- 5. 保存 AI 回复到 Supabase ---
+        // ---------- 9. 保存 AI 回复 ----------
         const { error: aiError } = await supabase
             .from('messages')
             .insert([{ role: 'ai', content: reply, session_id: sessionId }]);
@@ -838,31 +797,29 @@ chatMessages.push({ role: 'user', content: message });
             console.log('✅ AI 回复已存入 Supabase');
         }
 
-// --- 新增：尝试提取长期记忆（含去重检查） ---
+        // ---------- 10. 尝试提取长期记忆（含去重、向量化） ----------
         try {
             const memory = await extractMemories(message, reply);
-                console.log('🔍 进入记忆写入流程，memory 值:', memory);
+            console.log('🔍 进入记忆写入流程，memory 值:', memory);
             if (memory) {
                 console.log('🔍 memory 存在，进入去重检查...');
-                // 去重检查：判断是否已存在相似记忆
                 const isDuplicate = await isMemoryDuplicate(memory.content, memory.keywords);
                 if (!isDuplicate) {
-                    // 在写入记忆之前，生成向量
-                const embedding = await getEmbedding(memory.content);
-                if (embedding) {
-                // 存向量
-                await supabase.from('memories').insert([{
-                    content: memory.content,
-                    keywords: memory.keywords,
-                    embedding: embedding
-                }]);
-            } else {
-                // 回退：只存 content 和 keywords
-                await supabase.from('memories').insert([{
-                    content: memory.content,
-                    keywords: memory.keywords
-                }]);
-            }
+                    const embedding = await getEmbedding(memory.content);
+                    if (embedding) {
+                        await supabase.from('memories').insert([{
+                            content: memory.content,
+                            keywords: memory.keywords,
+                            embedding: embedding
+                        }]);
+                        console.log('🧠 新记忆已写入（含向量）');
+                    } else {
+                        await supabase.from('memories').insert([{
+                            content: memory.content,
+                            keywords: memory.keywords
+                        }]);
+                        console.log('🧠 新记忆已写入（无向量，回退）');
+                    }
                 } else {
                     console.log('🧠 重复记忆，已跳过写入');
                 }
@@ -873,7 +830,7 @@ chatMessages.push({ role: 'user', content: message });
             console.error('❌ 记忆提取失败:', error.message);
         }
 
-        // --- 6. 返回 AI 的回复给前端 ---
+        // ---------- 11. 返回回复 ----------
         res.json({ reply });
 
     } catch (error) {
