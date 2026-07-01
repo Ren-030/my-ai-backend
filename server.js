@@ -628,89 +628,100 @@ ${summary}
             console.log('📜 历史摘要已注入');
         }
 
-        // ---------- 5. 混合检索（Embedding + 关键词补充） ----------
-        // 5.1 获取当前消息的向量
-        const userEmbedding = await getEmbedding(message);
-        let memories = [];   // 最终用于注入的记忆列表，每项 { content, similarity }
+        // ---------- 5. 混合检索 + Memory Mode ----------
+    const userEmbedding = await getEmbedding(message);
+    let memories = [];
 
-        if (userEmbedding) {
-            // 5.2 Embedding 检索
-            const { data: matchedData, error: rpcError } = await supabase
-                .rpc('match_memories', {
-                    query_embedding: userEmbedding,
-                    match_threshold: 0.4,
-                    match_count: 5        // 最多返回 5 条
-                });
-
-            if (rpcError) {
-                console.error('❌ 向量检索出错:', rpcError);
-            } else {
-                console.log(`🧠 向量检索原始结果 ${matchedData?.length || 0} 条`);
-
-                // 过滤出高相似度记忆（>0.5）
-                const highQuality = (matchedData || []).filter(item => item.similarity > 0.5);
-                memories = highQuality.map(item => ({
-                    content: item.content,
-                    similarity: item.similarity
-                }));
-
-                console.log(`🧠 过滤后（>0.5）得到 ${memories.length} 条高质量记忆`);
-            }
-
-            // 5.3 如果高质量记忆少于 3 条，用关键词检索补充
-            if (memories.length < 3) {
-                console.log(`🔍 高质量记忆不足 3 条（当前 ${memories.length}），开始关键词检索补充...`);
-
-                // 分词（保留长度 > 1 的词）
-                const userWords = message.split(/[\s,，。！？、；：""''（）\n]+/).filter(w => w.length > 1);
-                if (userWords.length > 0) {
-                    const { data: keywordMatches, error: kwError } = await supabase
-                        .from('memories')
-                        .select('content, keywords')
-                        .overlaps('keywords', userWords);
-
-                    if (kwError) {
-                        console.error('❌ 关键词检索出错:', kwError);
-                    } else if (keywordMatches && keywordMatches.length > 0) {
-                        console.log(`🔍 关键词检索命中 ${keywordMatches.length} 条`);
-
-                        // 合并去重（用 content 去重）
-                        const existingContents = new Set(memories.map(m => m.content));
-                        keywordMatches.forEach(k => {
-                            if (!existingContents.has(k.content)) {
-                                memories.push({
-                                    content: k.content,
-                                    similarity: 0   // 关键词匹配无相似度，设为 0
-                                });
-                                existingContents.add(k.content);
-                            }
-                        });
-                        console.log(`🔍 补充后记忆总数 ${memories.length}`);
-                    } else {
-                        console.log('🔍 关键词检索无命中');
-                    }
+    if (userEmbedding) {
+    // ====== Memory Mode：根据对话意图决定阈值 ======
+    let threshold = 0.55; // 默认：普通闲聊
+    
+    const isUpdate = message.match(/以前|现在|之前|改为|更喜欢|开始/);
+    const isMemoryQuery = message.match(/还记得|我养了|我喜欢|我有什么|我的宠物|我的猫|我的狗|你知道吗|你记得吗/);
+    
+    if (isUpdate) {
+        threshold = 0.75;   // 更新模式：只匹配高度相关的记忆
+    } else if (isMemoryQuery) {
+        threshold = 0.4;    // 记忆查询：放宽阈值，召回更多候选
+    } else {
+        threshold = 0.55;   // 普通闲聊：只注入非常相关的记忆
+    }
+    
+    console.log(`🧠 Memory Mode: ${isUpdate ? 'UPDATE' : isMemoryQuery ? 'QUERY' : 'CHAT'}，阈值: ${threshold}`);
+    
+    // ====== 执行检索 ======
+    const { data: matchedData, error: rpcError } = await supabase
+        .rpc('match_memories', {
+            query_embedding: userEmbedding,
+            match_threshold: 0.4,   // RPC 本身用 0.4 召回
+            match_count: 10
+        });
+    
+    if (rpcError) {
+        console.error('❌ 向量检索出错:', rpcError);
+    } else {
+        console.log(`🧠 向量检索原始结果 ${matchedData?.length || 0} 条`);
+        
+        // 用 Memory Mode 阈值做二次过滤
+        const filtered = (matchedData || []).filter(item => item.similarity > threshold);
+        memories = filtered.map(item => ({
+            content: item.content,
+            similarity: item.similarity
+        }));
+        
+        console.log(`🧠 过滤后（阈值 ${threshold}）得到 ${memories.length} 条记忆`);
+        
+        // ====== 如果过滤后少于 2 条，且是 Memory Query，用关键词检索补充 ======
+        if (memories.length < 2 && isMemoryQuery) {
+            console.log(`🔍 记忆不足 2 条，且为 QUERY 模式，开始关键词检索补充...`);
+            
+            const userWords = message.split(/[\s,，。！？、；：""''（）\n]+/).filter(w => w.length > 1);
+            if (userWords.length > 0) {
+                const { data: keywordMatches, error: kwError } = await supabase
+                    .from('memories')
+                    .select('content, keywords')
+                    .overlaps('keywords', userWords);
+                
+                if (kwError) {
+                    console.error('❌ 关键词检索出错:', kwError);
+                } else if (keywordMatches && keywordMatches.length > 0) {
+                    console.log(`🔍 关键词检索命中 ${keywordMatches.length} 条`);
+                    
+                    const existingContents = new Set(memories.map(m => m.content));
+                    keywordMatches.forEach(k => {
+                        if (!existingContents.has(k.content)) {
+                            memories.push({
+                                content: k.content,
+                                similarity: 0
+                            });
+                            existingContents.add(k.content);
+                        }
+                    });
+                    console.log(`🔍 补充后记忆总数 ${memories.length}`);
                 } else {
-                    console.log('🔍 用户消息分词后无有效词，跳过关键词检索');
+                    console.log('🔍 关键词检索无命中');
                 }
+            } else {
+                console.log('🔍 用户消息分词后无有效词，跳过关键词检索');
             }
-        } else {
-            console.log('⚠️ 无法生成用户消息向量，跳过 Embedding 检索');
         }
+    }
+} else {
+    console.log('⚠️ 无法生成用户消息向量，跳过 Embedding 检索');
+}
 
-        // 5.4 将最终记忆注入到 chatMessages（如果有）
-        if (memories.length > 0) {
-            const memoryText = memories
-                .map(m => `- ${m.content}`)
-                .join('\n');
-            chatMessages.push({
-                role: 'system',
-                content: `【与当前话题相关的记忆】\n${memoryText}\n只参考这些信息。除非用户明确问及，否则不要在回复中主动罗列这些记忆。`
-            });
-            console.log(`🧠 最终注入 ${memories.length} 条记忆到上下文`);
-            console.log('🧠 命中的记忆内容:', JSON.stringify(memories.map(m => m.content)));
-        } else {
-            console.log('🧠 未检索到任何相关记忆，跳过注入');
-        }
+// 注入记忆到 chatMessages
+    if (memories.length > 0) {
+    const memoryText = memories.map(m => `- ${m.content}`).join('\n');
+    chatMessages.push({
+        role: 'system',
+        content: `【与当前话题相关的记忆】\n${memoryText}\n只参考这些信息。除非用户明确问及，否则不要在回复中主动罗列这些记忆。`
+     });
+    console.log(`🧠 最终注入 ${memories.length} 条记忆到上下文`);
+    console.log('🧠 命中的记忆内容:', JSON.stringify(memories.map(m => m.content)));
+} else {
+    console.log('🧠 未检索到任何相关记忆，跳过注入');
+}
 
         // ---------- 6. 获取最近 10 条消息（用于上下文延续） ----------
         const { data: recentMessages } = await supabase
