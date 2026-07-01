@@ -317,127 +317,131 @@ if (insertError) {
 const isMemoryDuplicate = async (newContent, newKeywords) => {
     if (!newKeywords || newKeywords.length === 0) return false;
 
-    // 关键词归一化（去掉“小”“大”等前缀）
+    // ---------- 工具函数与配置 ----------
+    // 关键词归一化（去掉“小”“大”等前缀，并做同义词映射）
     const normalize = kw => {
-    let word = kw.replace(/^小/, '').replace(/^大/, '').trim();
-    // 同义词映射
-    const synonymMap = {
-        '狗狗': '狗',
-        '猫猫': '猫',
-        '兔兔': '兔',
-        '仓鼠': '仓鼠', // 保持不变
-    };
+        let word = kw.replace(/^小/, '').replace(/^大/, '').trim();
+        const synonymMap = {
+            '狗狗': '狗',
+            '猫猫': '猫',
+            '兔兔': '兔',
+            '仓鼠': '仓鼠', // 保持不变
+        };
         return synonymMap[word] || word;
     };
+
     // 关键词停用词列表（用于去除无意义的词）
     const STOPWORDS = [
-    '我', '你', '他', '她', '它', '我们', '你们', '他们', '她们', '它们',
-    '的', '了', '在', '是', '有', '和', '与', '或', '但', '因为', '所以',
-    '用户', 'AI', 'claude', '茶与', '小窝', '长期记忆', '项目',
-    '一个', '一只', '一条', '一种', '这个', '那个', '什么', '怎么', '如何',
-    '宠物', '动物', '东西', '事情' // 新增泛化词
-     ];
+        '我', '你', '他', '她', '它', '我们', '你们', '他们', '她们', '它们',
+        '的', '了', '在', '是', '有', '和', '与', '或', '但', '因为', '所以',
+        '用户', 'AI', 'claude', '茶与', '小窝', '长期记忆', '项目',
+        '一个', '一只', '一条', '一种', '这个', '那个', '什么', '怎么', '如何',
+        '宠物', '动物', '东西', '事情' // 泛化词
+    ];
 
-    // 短句对长句的包含检查
+    // 短句对长句的包含检查（子集判定）
     const isShortContainedInLong = (short, long) => {
-    return short.every(kw => long.includes(kw));
+        return short.every(kw => long.includes(kw));
     };
 
+    // ---------- 提前过滤新记忆的关键词 ----------
+    const filteredNew = newKeywords
+        .map(normalize)
+        .filter(kw => kw.length > 0 && !STOPWORDS.includes(kw));
+
+    console.log('🔍 新记忆关键词（过滤前）:', newKeywords);
+    console.log('🔍 新记忆关键词（过滤后）:', filteredNew);
+
+    // ---------- 从数据库获取所有旧记忆 ----------
     const { data: existingMemories } = await supabase
         .from('memories')
         .select('id, content, keywords');
-        console.log('🔍 新记忆关键词（过滤前）:', newKeywords);
 
-    const filteredNew = newKeywords
-        .map(normalize)
-        .filter(kw => kw.length > 0 && !STOPWORDS.includes(kw));
-        console.log('🔍 新记忆关键词（过滤后）:', filteredNew);
+    if (!existingMemories || existingMemories.length === 0) {
+        console.log('🧠 数据库中没有旧记忆，无需去重');
+        return false;
+    }
 
-    if (!existingMemories || existingMemories.length === 0) return false;
+    // ========== 1. 优先检查更新信号（放在所有去重检查之前）==========
+    const updateSignals = ['改为', '更喜欢', '现在是', '变成', '已经', '开始'];
+    const shouldUpdate = updateSignals.some(signal => newContent.includes(signal));
 
-    for (const mem of existingMemories) {
-        if (!mem.keywords || mem.keywords.length === 0) continue;
+    if (shouldUpdate) {
+        console.log('🔍 检测到更新信号，尝试寻找最相似的旧记忆进行替换...');
+        const newEmbedding = await getEmbedding(newContent);
 
-        // 第一重：归一化 + 停用词过滤
-    const filteredNew = newKeywords
-        .map(normalize)
-        .filter(kw => kw.length > 0 && !STOPWORDS.includes(kw));
+        if (newEmbedding) {
+            const { data: similarMemories } = await supabase
+                .rpc('match_memories', {
+                    query_embedding: newEmbedding,
+                    match_threshold: 0.6,   // 高于这个阈值才认为“足够相似”
+                    match_count: 1          // 只取最相似的那一条
+                });
 
-    const filteredOld = mem.keywords
-        .map(normalize)
-        .filter(kw => kw.length > 0 && !STOPWORDS.includes(kw));
-        console.log('🔍 旧记忆关键词（过滤后）:', filteredOld);
+            if (similarMemories && similarMemories.length > 0) {
+                const target = similarMemories[0];
+                console.log(`🔄 成功找到最匹配的旧记忆！id=${target.id}，原内容是: "${target.content}"`);
 
-         // 如果新关键词过滤后是旧关键词的子集 → 去重
-        if (filteredNew.length > 0 && filteredOld.length > 0) {
-            const newIsSubset = isShortContainedInLong(filteredNew, filteredOld);
-            const oldIsSubset = isShortContainedInLong(filteredOld, filteredNew);
-        if (newIsSubset || oldIsSubset) {
-            console.log(`🧠 归一化+停用词过滤后，短句被长句包含 → 去重`);
-            return true;
+                // 更新这条旧记忆
+                await supabase
+                    .from('memories')
+                    .update({
+                        content: newContent,
+                        keywords: newKeywords,
+                        embedding: newEmbedding
+                    })
+                    .eq('id', target.id);
+
+                console.log(`🔄 更新成功：已把旧记忆替换为新记忆「${newContent}」`);
+                return true; // 已处理，不再作为新记忆写入
+            } else {
+                console.log('🔄 没发现足够相似的旧记忆，将进入常规去重检查（或作为新记忆写入）');
+                // 继续执行后续去重逻辑，不要直接返回 false
+            }
+        } else {
+            console.log('🔄 无法生成 embedding，跳过更新，进入常规去重检查');
         }
     }
 
-        // 第二重：不依赖阈值的双向子集包含检查（替换原来的旧逻辑）
+    // ========== 2. 常规去重检查 ==========
+    for (const mem of existingMemories) {
+        if (!mem.keywords || mem.keywords.length === 0) continue;
+
+        // 过滤旧记忆关键词
+        const filteredOld = mem.keywords
+            .map(normalize)
+            .filter(kw => kw.length > 0 && !STOPWORDS.includes(kw));
+
+        console.log('🔍 旧记忆关键词（过滤后）:', filteredOld);
+
+        // 2.1 内容完全相同的记忆 → 去重
+        if (mem.content === newContent) {
+            console.log('🧠 内容完全相同的旧记忆，跳过写入');
+            return true;
+        }
+
+        // 2.2 归一化+停用词过滤后的双向子集包含 → 去重
         if (filteredNew.length > 0 && filteredOld.length > 0) {
             const newIsSubset = isShortContainedInLong(filteredNew, filteredOld);
             const oldIsSubset = isShortContainedInLong(filteredOld, filteredNew);
             if (newIsSubset || oldIsSubset) {
-                console.log(`🧠 归一化+停用词过滤后，短句被长句包含 → 判定为重复`);
+                console.log('🧠 归一化+停用词过滤后，短句被长句包含 → 判定为重复，跳过写入');
                 return true;
             }
         }
-        // 3. 内容完全相同
-        if (mem.content === newContent) {
-            console.log('🧠 完全相同的记忆，跳过写入');
-            return true;
-        }
 
-        // 4. 计算重叠率（用 max 做分母，更公平）
+        // 2.3 基于原始关键词的重叠率（用 max 做分母，更公平）
         const intersection = mem.keywords.filter(kw => newKeywords.includes(kw));
         const overlapRatio = intersection.length / Math.max(newKeywords.length, mem.keywords.length);
-        
-        // ✅ 5. 全新检测更新信号逻辑
-        const updateSignals = ['改为', '更喜欢', '现在是', '变成', '已经', '开始'];
-        const shouldUpdate = updateSignals.some(signal => newContent.includes(signal));
-            //  如果触发了更新信号，或者是关键词重合度特别高（大于 0.7）
-        if (shouldUpdate || overlapRatio > 0.7) {
-            console.log(`🔍 触发了更新机制，开始寻找最相似的旧记忆...`);
-            // 1. 先用 embedding 找最相似的记忆
-            const newEmbedding = await getEmbedding(newContent);
-            if (newEmbedding) {
-                const { data: similarMemories } = await supabase
-                    .rpc('match_memories', {
-                        query_embedding: newEmbedding,
-                        match_threshold: 0.6,   // 高于这个阈值才认为“足够相似”
-                        match_count: 1         // 只取最相似的那一条  
-                    });
 
-                if (similarMemories && similarMemories.length > 0) {
-                    const target = similarMemories[0];
-                    console.log(`🔄 成功找到最匹配的旧记忆！id=${target.id}, 原内容是: "${target.content}"`);
-            // 2. 更新这条记忆
-                    await supabase
-                        .from('memories')
-                        .update({ 
-                            content: newContent, 
-                            keywords: newKeywords,
-                            embedding: newEmbedding 
-                        })
-                        .eq('id', target.id);
-                        
-                    console.log(`🔄 更新成功啦：已把旧记忆替换为新记忆「${newContent}」`);
-                    return true; 
-                } else {
-                    console.log('🔄 没发现足够相似的旧记忆，跳过更新');
-                    return false; 
-                }
-            } else {
-                console.log('🔄 无法生成 embedding，跳过更新');
-                return false;
-            }
+        if (overlapRatio > 0.7) {
+            console.log(`🧠 关键词重叠率过高 (${overlapRatio.toFixed(2)}) → 判定为重复，跳过写入`);
+            return true;
         }
     }
+
+    // 所有检查通过，未发现重复，允许写入新记忆
+    console.log('✅ 未发现重复记忆，允许写入新记忆');
     return false;
 };
 
