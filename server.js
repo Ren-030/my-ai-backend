@@ -318,28 +318,25 @@ const isMemoryDuplicate = async (newContent, newKeywords) => {
     if (!newKeywords || newKeywords.length === 0) return false;
 
     // ---------- 工具函数与配置 ----------
-    // 关键词归一化（去掉“小”“大”等前缀，并做同义词映射）
     const normalize = kw => {
         let word = kw.replace(/^小/, '').replace(/^大/, '').trim();
         const synonymMap = {
             '狗狗': '狗',
             '猫猫': '猫',
             '兔兔': '兔',
-            '仓鼠': '仓鼠', // 保持不变
+            '仓鼠': '仓鼠',
         };
         return synonymMap[word] || word;
     };
 
-    // 关键词停用词列表（用于去除无意义的词）
     const STOPWORDS = [
         '我', '你', '他', '她', '它', '我们', '你们', '他们', '她们', '它们',
         '的', '了', '在', '是', '有', '和', '与', '或', '但', '因为', '所以',
         '用户', 'AI', 'claude', '茶与', '小窝', '长期记忆', '项目',
         '一个', '一只', '一条', '一种', '这个', '那个', '什么', '怎么', '如何',
-        '宠物', '动物', '东西', '事情' // 泛化词
+        '宠物', '动物', '东西', '事情'
     ];
 
-    // 短句对长句的包含检查（子集判定）
     const isShortContainedInLong = (short, long) => {
         return short.every(kw => long.includes(kw));
     };
@@ -362,45 +359,18 @@ const isMemoryDuplicate = async (newContent, newKeywords) => {
         return false;
     }
 
-    // ========== 1. 优先检查更新信号（放在所有去重检查之前）==========
+    // ========== 1. 优先检查显式更新信号 ==========
     const updateSignals = ['改为', '更喜欢', '现在是', '变成', '已经', '开始'];
     const shouldUpdate = updateSignals.some(signal => newContent.includes(signal));
 
     if (shouldUpdate) {
-        console.log('🔍 检测到更新信号，尝试寻找最相似的旧记忆进行替换...');
-        const newEmbedding = await getEmbedding(newContent);
-
-        if (newEmbedding) {
-            const { data: similarMemories } = await supabase
-                .rpc('match_memories', {
-                    query_embedding: newEmbedding,
-                    match_threshold: 0.6,   // 高于这个阈值才认为“足够相似”
-                    match_count: 1          // 只取最相似的那一条
-                });
-
-            if (similarMemories && similarMemories.length > 0) {
-                const target = similarMemories[0];
-                console.log(`🔄 成功找到最匹配的旧记忆！id=${target.id}，原内容是: "${target.content}"`);
-
-                // 更新这条旧记忆
-                await supabase
-                    .from('memories')
-                    .update({
-                        content: newContent,
-                        keywords: newKeywords,
-                        embedding: newEmbedding
-                    })
-                    .eq('id', target.id);
-
-                console.log(`🔄 更新成功：已把旧记忆替换为新记忆「${newContent}」`);
-                return true; // 已处理，不再作为新记忆写入
-            } else {
-                console.log('🔄 没发现足够相似的旧记忆，将进入常规去重检查（或作为新记忆写入）');
-                // 继续执行后续去重逻辑，不要直接返回 false
-            }
-        } else {
-            console.log('🔄 无法生成 embedding，跳过更新，进入常规去重检查');
+        console.log('🔍 检测到显式更新信号，尝试寻找最相似的旧记忆进行替换...');
+        const updated = await tryUpdateWithEmbedding(newContent, newKeywords);
+        if (updated) {
+            console.log('🔄 更新成功（显式信号），跳过写入');
+            return true;
         }
+        console.log('🔄 显式更新信号未找到匹配记忆，继续走常规去重检查');
     }
 
     // ========== 2. 常规去重检查 ==========
@@ -414,23 +384,40 @@ const isMemoryDuplicate = async (newContent, newKeywords) => {
 
         console.log('🔍 旧记忆关键词（过滤后）:', filteredOld);
 
-        // 2.1 内容完全相同的记忆 → 去重
+        // 2.1 内容完全相同 → 直接去重
         if (mem.content === newContent) {
             console.log('🧠 内容完全相同的旧记忆，跳过写入');
             return true;
         }
 
-        // 2.2 归一化+停用词过滤后的双向子集包含 → 去重
         if (filteredNew.length > 0 && filteredOld.length > 0) {
             const newIsSubset = isShortContainedInLong(filteredNew, filteredOld);
             const oldIsSubset = isShortContainedInLong(filteredOld, filteredNew);
+
+            // 🔄 新增：如果旧记忆是新记忆的子集，且两者不完全相同 → 可能是偏好更新
+            if (oldIsSubset && !newIsSubset && filteredNew.length !== filteredOld.length) {
+                console.log('🧠 旧记忆是新记忆的子集但有关键词扩展，尝试作为“更新”处理...');
+                // 尝试用 embedding 定位最相似的旧记忆并更新
+                const updated = await tryUpdateWithEmbedding(newContent, newKeywords);
+                if (updated) {
+                    console.log('🔄 通过子集检测成功更新了旧记忆，跳过写入');
+                    return true;
+                }
+                // 如果未找到可更新的记忆（可能 embedding 没匹配上），这里不直接去重，
+                // 让新记忆正常写入，保留信息。如果确实想避免重复，也可以 return true，
+                // 根据你的业务倾向选择。这里选择继续检查其他记忆（break/继续）
+                console.log('🔄 子集更新未找到匹配记忆，继续检查其他旧记忆...');
+                continue; // 跳过本条旧记忆，继续判断下一条
+            }
+
+            // 2.2 双向子集包含（完全被包含的情况）→ 去重
             if (newIsSubset || oldIsSubset) {
                 console.log('🧠 归一化+停用词过滤后，短句被长句包含 → 判定为重复，跳过写入');
                 return true;
             }
         }
 
-        // 2.3 基于原始关键词的重叠率（用 max 做分母，更公平）
+        // 2.3 基于原始关键词的重叠率（用 max 做分母）
         const intersection = mem.keywords.filter(kw => newKeywords.includes(kw));
         const overlapRatio = intersection.length / Math.max(newKeywords.length, mem.keywords.length);
 
@@ -440,10 +427,46 @@ const isMemoryDuplicate = async (newContent, newKeywords) => {
         }
     }
 
-    // 所有检查通过，未发现重复，允许写入新记忆
     console.log('✅ 未发现重复记忆，允许写入新记忆');
     return false;
 };
+
+// ---------- 抽取出的更新逻辑（避免重复代码）----------
+async function tryUpdateWithEmbedding(newContent, newKeywords) {
+    console.log('🔍 尝试通过 embedding 寻找可更新的旧记忆...');
+    const newEmbedding = await getEmbedding(newContent);
+    if (!newEmbedding) {
+        console.log('❌ 无法生成 embedding，更新失败');
+        return false;
+    }
+
+    const { data: similarMemories } = await supabase
+        .rpc('match_memories', {
+            query_embedding: newEmbedding,
+            match_threshold: 0.6,
+            match_count: 1
+        });
+
+    if (similarMemories && similarMemories.length > 0) {
+        const target = similarMemories[0];
+        console.log(`🔄 找到最匹配的旧记忆 id=${target.id}，原内容: "${target.content}"`);
+
+        await supabase
+            .from('memories')
+            .update({
+                content: newContent,
+                keywords: newKeywords,
+                embedding: newEmbedding
+            })
+            .eq('id', target.id);
+
+        console.log(`✅ 已更新旧记忆为：「${newContent}」`);
+        return true;
+    } else {
+        console.log('🔍 没有找到 embedding 相似的旧记忆，无法更新');
+        return false;
+    }
+}
 
 // 记忆判断器：从对话中提取值得长期记住的信息
 const extractMemories = async (userMessage, aiReply) => {
