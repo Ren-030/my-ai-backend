@@ -471,7 +471,7 @@ const tryUpdateWithEmbedding = async (newContent, newKeywords) => {
     for (const item of ranked) {
         const oldKeywords = candidates.find(c => c.id === item.id)?.keywords || [];
         const overlap = oldKeywords.filter(kw => newKeywords.includes(kw));
-        if (overlap.length / newKeywords.length > 0.5) {
+        if (oldKeywords.every(kw => newKeywords.includes(kw))) {
             console.log(`🔄 找到可更新的记忆：id=${item.id}, content="${item.content}", overlap=${overlap.length}`);
             await supabase
                 .from('memories')
