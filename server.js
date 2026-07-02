@@ -518,9 +518,9 @@ ${aiReply}
 - 技术排错过程
 
 【输出要求】
-- 如果值得记住，返回一个 JSON 对象，包含两个字段：
-  - content：记忆内容（简洁的句子）
-  - keywords：关键词数组（2-3个，用于检索）
+- 如果值得记住，返回 JSON 对象，包含 content 和 keywords 两个字段。
+- content 必须以“用户”开头。
+- keywords 是 2-3 个关键词的数组。
 - 如果不值得记住，只返回：NO_MEMORY
 
 【关键词提取规则（重要）】
@@ -533,10 +533,20 @@ ${aiReply}
 4. 不要输出修饰词（小、很、特别、超级等）。
 5. 最多输出 3 个关键词。
 
-【输出示例】
-用户说："我叫茶与，我喜欢喝红茶。"
-→ 返回：{"content": "茶与喜欢喝红茶", "keywords": ["红茶", "茶", "茶与"]}
+【正确示例】
+用户说：“我喜欢喝红茶。”
+→ {"content": "用户喜欢喝红茶", "keywords": ["红茶", "饮品"]}
 
+用户说：“我最喜欢的季节是秋天。”
+→ {"content": "用户最喜欢的季节是秋天", "keywords": ["秋天", "季节"]}
+
+【错误示例】
+- 错误：{"content": "喜欢喝红茶", "keywords": ["红茶"]}
+- 错误：{"content": "最喜欢的季节是秋天", "keywords": ["秋天"]}
+
+无任何例外。请严格按照“用户”开头格式输出。
+
+【输出示例】
 用户说："今天天气真好。"
 → 返回：NO_MEMORY
 
@@ -609,8 +619,8 @@ const isValidMemory = (memory) => {
     }
 
     // 第三层：必须包含“用户”（确保是用户事实）
-    if (!memory.content.includes('用户') && !memory.content.includes('我')) {
-    console.log('🛡️ Guard 拦截：内容不包含"用户"或"我"');
+    if (!memory.content.startsWith('用户')) {
+    console.log('🛡️ Guard 拦截：content 不以"用户"开头');
     return false;
     }
 
