@@ -609,9 +609,9 @@ const isValidMemory = (memory) => {
     }
 
     // 第三层：必须包含“用户”（确保是用户事实）
-    if (!memory.content.includes('用户')) {
-        console.log('🛡️ Guard 拦截：内容不包含"用户"');
-        return false;
+    if (!memory.content.includes('用户') && !memory.content.includes('我')) {
+    console.log('🛡️ Guard 拦截：内容不包含"用户"或"我"');
+    return false;
     }
 
     // 第四层：不能来自 AI 回复（检查是否包含 AI 编造的特征词）
