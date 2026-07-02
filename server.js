@@ -589,7 +589,7 @@ AI说：${aiReply}
     if (parsedResult.keywords) {
         parsedResult.keywords = normalizeKeywords(parsedResult.keywords);
     }
-
+    console.log('🧠 extractMemories 原始返回:', result);
     return parsedResult;
 };
 
