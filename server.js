@@ -472,6 +472,7 @@ const tryUpdateWithEmbedding = async (newContent, newKeywords) => {
         const oldKeywords = candidates.find(c => c.id === item.id)?.keywords || [];
         const overlap = oldKeywords.filter(kw => newKeywords.includes(kw));
         if (oldKeywords.every(kw => newKeywords.includes(kw))) {
+            // 执行更新
             console.log(`🔄 找到可更新的记忆：id=${item.id}, content="${item.content}", overlap=${overlap.length}`);
             await supabase
                 .from('memories')
@@ -591,6 +592,36 @@ AI说：${aiReply}
     }
     console.log('🧠 extractMemories 原始返回:', result);
     return parsedResult;
+};
+
+// ====== Guard V1：记忆质量检查 ======
+const isValidMemory = (memory) => {
+    // 第一层：关键词不能为空
+    if (!memory.keywords || memory.keywords.length === 0) {
+        console.log('🛡️ Guard 拦截：关键词为空');
+        return false;
+    }
+
+    // 第二层：内容不能太短（少于 6 个字符）
+    if (memory.content.length < 6) {
+        console.log('🛡️ Guard 拦截：内容过短');
+        return false;
+    }
+
+    // 第三层：必须包含“用户”（确保是用户事实）
+    if (!memory.content.includes('用户')) {
+        console.log('🛡️ Guard 拦截：内容不包含"用户"');
+        return false;
+    }
+
+    // 第四层：不能来自 AI 回复（检查是否包含 AI 编造的特征词）
+    const aiPhrases = ['咖啡加牛奶', '可能', '似乎', '也许', '我猜', '应该'];
+    if (aiPhrases.some(phrase => memory.content.includes(phrase))) {
+        console.log('🛡️ Guard 拦截：疑似 AI 编造');
+        return false;
+    }
+
+    return true;
 };
 
 // ========================
@@ -853,38 +884,43 @@ ${summary}
             console.log('✅ AI 回复已存入 Supabase');
         }
 
-        // ---------- 10. 尝试提取长期记忆（含去重、向量化） ----------
+        // ---------- 10. 尝试提取长期记忆（含Guard、去重、向量化） ----------
         try {
-            const memory = await extractMemories(message, reply);
-            console.log('🔍 进入记忆写入流程，memory 值:', memory);
-            if (memory) {
-                console.log('🔍 memory 存在，进入去重检查...');
-                const isDuplicate = await isMemoryDuplicate(memory.content, memory.keywords);
-                if (!isDuplicate) {
-                    const embedding = await getEmbedding(memory.content);
-                    if (embedding) {
-                        await supabase.from('memories').insert([{
-                            content: memory.content,
-                            keywords: memory.keywords,
-                            embedding: embedding
-                        }]);
-                        console.log('🧠 新记忆已写入（含向量）');
-                    } else {
-                        await supabase.from('memories').insert([{
-                            content: memory.content,
-                            keywords: memory.keywords
-                        }]);
-                        console.log('🧠 新记忆已写入（无向量，回退）');
-                    }
+    const memory = await extractMemories(message, reply);
+    console.log('🔍 进入记忆写入流程，memory 值:', memory);
+    if (memory) {
+        console.log('🔍 memory 存在，进入 Guard 检查...');
+        if (isValidMemory(memory)) {
+            console.log('🛡️ Guard 通过，进入去重检查...');
+            const isDuplicate = await isMemoryDuplicate(memory.content, memory.keywords);
+            if (!isDuplicate) {
+                const embedding = await getEmbedding(memory.content);
+                if (embedding) {
+                    await supabase.from('memories').insert([{
+                        content: memory.content,
+                        keywords: memory.keywords,
+                        embedding: embedding
+                    }]);
+                    console.log('🧠 新记忆已写入（含向量）');
                 } else {
-                    console.log('🧠 重复记忆，已跳过写入');
+                    await supabase.from('memories').insert([{
+                        content: memory.content,
+                        keywords: memory.keywords
+                    }]);
+                    console.log('🧠 新记忆已写入（无向量，回退）');
                 }
             } else {
-                console.log('🔍 memory 为空，跳过写入');
+                console.log('🧠 重复记忆，已跳过写入');
             }
-        } catch (error) {
-            console.error('❌ 记忆提取失败:', error.message);
+        } else {
+            console.log('🛡️ Guard 拦截，跳过写入');
         }
+    } else {
+        console.log('🔍 memory 为空，跳过写入');
+    }
+} catch (error) {
+    console.error('❌ 记忆提取失败:', error.message);
+}
 
         // ---------- 11. 返回回复 ----------
         res.json({ reply });
