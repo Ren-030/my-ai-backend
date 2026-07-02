@@ -431,42 +431,60 @@ const isMemoryDuplicate = async (newContent, newKeywords) => {
     return false;
 };
 
-// ---------- 抽取出的更新逻辑（避免重复代码）----------
-async function tryUpdateWithEmbedding(newContent, newKeywords) {
-    console.log('🔍 尝试通过 embedding 寻找可更新的旧记忆...');
-    const newEmbedding = await getEmbedding(newContent);
-    if (!newEmbedding) {
-        console.log('❌ 无法生成 embedding，更新失败');
+// ---------- 抽取出的更新逻辑----------
+const tryUpdateWithEmbedding = async (newContent, newKeywords) => {
+    // 1. 关键词预过滤：只检索包含至少一个相同关键词的记忆
+    const { data: candidates } = await supabase
+        .from('memories')
+        .select('id, content, keywords')
+        .overlaps('keywords', newKeywords);
+
+    if (!candidates || candidates.length === 0) {
+        console.log('🔍 关键词预过滤无候选，跳过更新');
         return false;
     }
 
-    const { data: similarMemories } = await supabase
-        .rpc('match_memories', {
-            query_embedding: newEmbedding,
+    console.log(`🔍 关键词预过滤得到 ${candidates.length} 条候选记忆`);
+
+    // 2. 对候选集做 Embedding 排序
+    const embedding = await getEmbedding(newContent);
+    if (!embedding) {
+        console.log('🔍 无法生成 embedding，跳过更新');
+        return false;
+    }
+
+    // 用候选集的 id 列表做向量检索（只在这些候选里找）
+    const { data: ranked } = await supabase
+        .rpc('match_memories_with_ids', {
+            query_embedding: embedding,
             match_threshold: 0.6,
-            match_count: 1
+            match_count: 3,
+            ids: candidates.map(c => c.id)
         });
 
-    if (similarMemories && similarMemories.length > 0) {
-        const target = similarMemories[0];
-        console.log(`🔄 找到最匹配的旧记忆 id=${target.id}，原内容: "${target.content}"`);
-
-        await supabase
-            .from('memories')
-            .update({
-                content: newContent,
-                keywords: newKeywords,
-                embedding: newEmbedding
-            })
-            .eq('id', target.id);
-
-        console.log(`✅ 已更新旧记忆为：「${newContent}」`);
-        return true;
-    } else {
-        console.log('🔍 没有找到 embedding 相似的旧记忆，无法更新');
+    if (!ranked || ranked.length === 0) {
+        console.log('🔍 Embedding 检索无结果，跳过更新');
         return false;
     }
-}
+
+    // 3. 关键词重叠验证：只更新重叠度最高的那一条
+    for (const item of ranked) {
+        const oldKeywords = candidates.find(c => c.id === item.id)?.keywords || [];
+        const overlap = oldKeywords.filter(kw => newKeywords.includes(kw));
+        if (overlap.length / newKeywords.length > 0.5) {
+            console.log(`🔄 找到可更新的记忆：id=${item.id}, content="${item.content}", overlap=${overlap.length}`);
+            await supabase
+                .from('memories')
+                .update({ content: newContent, keywords: newKeywords })
+                .eq('id', item.id);
+            console.log(`✅ 已更新旧记忆为：「${newContent}」`);
+            return true;
+        }
+    }
+
+    console.log('🔍 没有找到满足重叠条件的候选，跳过更新');
+    return false;
+};
 
 // 记忆判断器：从对话中提取值得长期记住的信息
 const extractMemories = async (userMessage, aiReply) => {
