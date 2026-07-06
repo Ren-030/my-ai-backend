@@ -844,7 +844,7 @@ ${summary}
         if (model === 'claude') {
             apiUrl = 'https://yunwu.ai/v1/chat/completions';
             apiKey = process.env.CLAUDE_API_KEY;
-            modelName = 'claude-opus-4-6';
+            modelName = 'claude-sonnet-4-6';
         } else if (model === 'gemini') {
             apiUrl = 'https://yunwu.ai/v1/chat/completions';
             apiKey = process.env.GEMINI_API_KEY;
